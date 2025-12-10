@@ -9,7 +9,8 @@ export type AIModelOption =
   | 'venice-dolphin-mistral-24b' 
   | 'mistralai-devstral-2512' 
   | 'deepseek-r1-free'
-  | 'deepseek-chat';
+  | 'deepseek-chat'
+  | 'local-offline';
 
 export type VoicePreference = string;
 

@@ -232,6 +232,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       const botResponseText = await generateBotResponse(
           newHistory, 
           { 
+              name: bot.name,
               personality: bot.personality, 
               isSpicy: bot.isSpicy,
               conversationMode: bot.conversationMode,
@@ -290,6 +291,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
           const botResponseText = await generateBotResponse(
               historyForRegen, 
               { 
+                  name: bot.name,
                   personality: bot.personality, 
                   isSpicy: bot.isSpicy,
                   conversationMode: bot.conversationMode,
@@ -306,7 +308,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       } finally {
           setIsTyping(false);
       }
-  }, [chatHistory, bot.personality, bot.isSpicy, bot.conversationMode, bot.gender, selectedAI, onUpdateHistory]);
+  }, [chatHistory, bot.name, bot.personality, bot.isSpicy, bot.conversationMode, bot.gender, selectedAI, onUpdateHistory]);
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();

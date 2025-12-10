@@ -21,6 +21,7 @@ interface SettingsPanelProps {
 
 // FIX: Corrected the display names for Gemini models from 1.5 to 2.5 to match the actual models.
 const aiModelOptions: { id: AIModelOption, name: string }[] = [
+    { id: 'local-offline', name: '⚡ Local / Offline (Privacy Mode)' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)' },

@@ -2,21 +2,22 @@
 import { GoogleGenAI, Content, Part, Modality } from "@google/genai";
 import { ChatMessage, AIModelOption, BotProfile } from "../types";
 import { xyz } from "./xyz";
+import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🔑 AUTHENTICATION SETUP (HARDCODED KEYS)
+// 🔑 AUTHENTICATION SETUP (ENV VARIABLES)
 // ------------------------------------------------------------------
+
+const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 // Gemini API Instance
+// Initialize with a placeholder if missing to prevent crash on startup.
+// Individual calls will check for key presence.
 const ai = new GoogleGenAI({ 
-  apiKey: "AIzaSyBL4GJ4JxHJNotiHpMV6T8L_ChcFClv8no" 
+  apiKey: GEMINI_KEY || "missing-key" 
 });
-
-// OpenRouter API Key
-const OPENROUTER_KEY = "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";
-
-// DeepSeek API Key (Direct)
-const DEEPSEEK_KEY = "sk-3f0394b8afb741788d67cadb73f4856a";
 
 // ------------------------------------------------------------------
 // 🛠️ HELPER FUNCTIONS
@@ -44,8 +45,13 @@ async function retry<T>(fn: () => Promise<T>): Promise<T> {
       lastError = error;
       const msg = error?.message || JSON.stringify(error);
 
-      // NO retry on empty response or auth errors
-      if (msg.includes("Empty response") || msg.includes("Invalid")) throw error;
+      // NO retry on empty response, auth errors, or missing keys
+      if (
+          msg.includes("Empty response") || 
+          msg.includes("Invalid") || 
+          msg.includes("missing") ||
+          msg.includes("key")
+      ) throw error;
 
       // Stop retrying if it's the last attempt
       if (i < RETRY_DELAYS.length - 1) {
@@ -64,6 +70,8 @@ const callDeepSeek = async (
   systemPrompt: string,
   history: ChatMessage[]
 ): Promise<string> => {
+  if (!DEEPSEEK_KEY) throw new Error("(System: DeepSeek API key missing. Please update settings.)");
+
   const messages = [
     { role: "system", content: systemPrompt },
     ...history.map(msg => ({
@@ -119,6 +127,8 @@ const callOpenRouter = async (
   systemPrompt: string,
   history: ChatMessage[]
 ): Promise<string> => {
+  if (!OPENROUTER_KEY) throw new Error("(System: OpenRouter API key missing. Please update settings.)");
+  
   const openRouterModelString = OPENROUTER_MODELS[modelId];
   if (!openRouterModelString) throw new Error("(System: Model not supported)");
 
@@ -181,6 +191,7 @@ const callGeminiText = async (
   history: ChatMessage[],
   model: string
 ): Promise<string> => {
+  if (!GEMINI_KEY) throw new Error("(System: Gemini API key missing. Please update settings.)");
   
   const contents: Content[] = history.map(msg => ({
     role: msg.sender === "user" ? "user" : "model",
@@ -234,9 +245,20 @@ const generateText = async (
   selectedAI: AIModelOption
 ): Promise<string> => {
   
+  // 0. LOCAL OFFLINE MODE (No network, no API keys)
+  if (selectedAI === 'local-offline') {
+     // We can't use generateText directly for local since it needs BotProfile context
+     // This case is handled in generateBotResponse, but we add a safety return here.
+     return "(System: Local engine requires direct call. Please use generateBotResponse.)";
+  }
+
   // 1. ROUTE TO DEEPSEEK (Direct)
   if (selectedAI === 'deepseek-chat') {
-    return await callDeepSeek(systemPrompt, history);
+    try {
+        return await callDeepSeek(systemPrompt, history);
+    } catch (err: any) {
+        return err.message || "(System: DeepSeek error)";
+    }
   }
 
   // 2. ROUTE TO OPENROUTER
@@ -263,12 +285,18 @@ const generateText = async (
   } catch (err: any) {
     const msg = err?.message || '';
     
+    // Check for missing key specific error first to avoid failover loop if key is just missing
+    if (msg.includes("API key missing")) {
+        return msg;
+    }
+
     // If Gemini 429 (Busy) or 500 (Error) -> Fallback to DeepSeek
     if (msg.includes('429') || msg.includes('Quota') || msg.includes('500') || msg.includes('Overloaded')) {
         console.warn("Gemini failing, falling back to DeepSeek...");
         try {
             return await callDeepSeek(systemPrompt, history);
-        } catch (dsErr) {
+        } catch (dsErr: any) {
+             if (dsErr.message.includes("key missing")) return "(System: Gemini busy & DeepSeek key missing.)";
              return "(System: All providers busy. Please try again.)";
         }
     }
@@ -286,9 +314,17 @@ const generateText = async (
 
 export const generateBotResponse = async (
   history: ChatMessage[],
-  botProfile: Pick<BotProfile, "personality" | "isSpicy" | "conversationMode" | "gender">,
+  botProfile: Pick<BotProfile, "name" | "personality" | "isSpicy" | "conversationMode" | "gender">,
   selectedAI: AIModelOption
 ): Promise<string> => {
+  
+  // ⚡ LOCAL ENGINE INTERCEPT
+  if (selectedAI === 'local-offline') {
+      // Simulate network delay for realism (300ms - 1200ms)
+      await new Promise(res => setTimeout(res, 300 + Math.random() * 900));
+      return processLocalResponse(history, botProfile);
+  }
+
   try {
     const mode = botProfile.conversationMode || (botProfile.isSpicy ? 'spicy' : 'normal');
     const gender = botProfile.gender || 'female';
@@ -333,6 +369,8 @@ export async function generateScenarioIdea(personalities?: string[]): Promise<st
 // ------------------------------------------------------------------
 
 export async function generateImage(prompt: string, sourceImage: string | null): Promise<string> {
+  if (!GEMINI_KEY) throw new Error("Gemini API key missing. Please check your environment settings.");
+
   try {
     const model = "gemini-2.5-flash-image";
     const parts: Part[] = [{ text: prompt }];

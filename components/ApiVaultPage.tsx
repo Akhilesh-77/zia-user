@@ -67,13 +67,43 @@ const ApiVaultPage: React.FC<ApiVaultPageProps> = ({ apiKeys, onSaveKey, onDelet
                     <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
                     <h1 className="text-3xl font-bold">API Vault 🛡️</h1>
                 </div>
-                <button 
-                    onClick={() => handleOpenModal()} 
-                    className="p-3 bg-accent text-white rounded-full shadow-lg hover:scale-105 transition-transform"
-                    aria-label="Add API Key"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                </button>
+                
+                <div className="flex items-center gap-2">
+                    {/* Google AI Studio Link Button */}
+                    <a 
+                        href="https://aistudio.google.com/api-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-3 bg-white/5 dark:bg-black/10 text-gray-400 rounded-full hover:bg-accent/10 hover:text-accent transition-all"
+                        aria-label="Google AI Studio API Keys"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                    </a>
+
+                    {/* Vercel Env Vars Link Button */}
+                    <a 
+                        href="https://vercel.com/akhileshs-projects-f1431210/zia-pro-akhilesh277u/settings/environment-variables"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-3 bg-white/5 dark:bg-black/10 text-gray-400 rounded-full hover:bg-accent/10 hover:text-accent transition-all"
+                        aria-label="Manage Environment Variables"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                    </a>
+
+                    {/* Add Button */}
+                    <button 
+                        onClick={() => handleOpenModal()} 
+                        className="p-3 bg-accent text-white rounded-full shadow-lg hover:scale-105 transition-transform"
+                        aria-label="Add API Key"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    </button>
+                </div>
             </header>
 
             <main className="flex-1 overflow-y-auto pb-24 space-y-3 no-scrollbar">

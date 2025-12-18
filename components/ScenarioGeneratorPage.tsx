@@ -80,14 +80,17 @@ const PromptsPage: React.FC = () => {
                     <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
                     <h1 className="text-3xl font-bold">Prompts 📝</h1>
                     
-                    {/* ChatGPT Redirect Button - Replaced icon with "Create" text button */}
+                    {/* ChatGPT Redirect Button */}
                     <a 
                         href="https://chat.openai.com" 
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="px-3 py-1.5 ml-1 bg-white/5 dark:bg-black/10 text-gray-400 rounded-full hover:bg-accent/10 hover:text-accent transition-all flex items-center justify-center text-[10px] font-bold uppercase tracking-wider"
+                        className="p-1.5 ml-1 bg-white/5 dark:bg-black/10 text-gray-400 rounded-full hover:bg-accent/10 hover:text-accent transition-all flex items-center justify-center"
+                        aria-label="Open ChatGPT"
                     >
-                        Create
+                        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5153-4.9066 6.0462 6.0462 0 0 0-3.9998-3.1202 6.0277 6.0277 0 0 0-5.0777.9807 6.0335 6.0335 0 0 0-4.5773-2.1072 6.0559 6.0559 0 0 0-5.186 3.0335A6.0573 6.0573 0 0 0 .4365 8.7501a6.0029 6.0029 0 0 0 3.1701 5.0263 5.9904 5.9904 0 0 0 .5153 4.9066 6.054 6.054 0 0 0 4.0014 3.1202 6.0335 6.0335 0 0 0 5.0777-.9807 6.0648 6.0648 0 0 0 4.5773 2.1072 6.0648 6.0648 0 0 0 4.5773 2.1072 6.0559 6.0559 0 0 0 5.186-3.0335 6.0559 6.0559 0 0 0 2.5043-5.0416 6.051 6.051 0 0 0-3.1867-5.0335zM12.103 21.0176a4.5822 4.5822 0 0 1-2.0839-.4947l.1026-.0587 5.2218-3.0154a.7071.7071 0 0 0 .3539-.6129V9.8297l1.6435.9487a.0489.0489 0 0 1 .0244.044v5.7933a4.5671 4.5671 0 0 1-5.2617 4.3999zM4.4149 18.336a4.5061 4.5061 0 0 1-.1903-5.37l.1026.0587 5.2218 3.0154a.7071.7071 0 0 0 .7079 0V10.292l-1.6435-.9487a.0489.0489 0 0 1-.0244-.044V3.5061a4.5671 4.5671 0 0 1 7.1283-3.4512l-.1026.0587-5.2218 3.0154a.7071.7071 0 0 0-.3539.6129v7.0094l-1.6435-.9487a.0489.0489 0 0 1-.0244-.044V4.0456a4.5671 4.5671 0 0 1 5.2617-4.3999 4.5822 4.5822 0 0 1 2.0839.4947l-.1026.0587-5.2218 3.0154a.7071.7071 0 0 0-.7079 0v5.7413l1.6435.9487a.0489.0489 0 0 1 .0244.044v5.7933a4.5671 4.5671 0 0 1-7.1283 3.4512l.1026-.0587 5.2218-3.0154a.7071.7071 0 0 0 .3539-.6129V9.8297l1.6435.9487a.0489.0489 0 0 1 .0244.044v5.7933a4.5671 4.5671 0 0 1-5.2617 4.4z"/>
+                        </svg>
                     </a>
                 </div>
                 
@@ -140,7 +143,7 @@ const PromptsPage: React.FC = () => {
                                     onClick={() => handleCopy(block.content, block.id)} 
                                     className={`mt-2 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${blockCopyId === block.id ? 'bg-green-500 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'}`}
                                 >
-                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2"/></svg>
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2"/></svg>
                                     {blockCopyId === block.id ? 'Copied' : 'Copy'}
                                 </button>
                             </div>
@@ -153,7 +156,7 @@ const PromptsPage: React.FC = () => {
 
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 animate-fadeIn" onClick={() => setIsModalOpen(false)}>
-                    <div className="bg-dark-bg w-full max-sm rounded-3xl p-6 border border-white/10" onClick={e => e.stopPropagation()}>
+                    <div className="bg-dark-bg w-full max-w-sm rounded-3xl p-6 border border-white/10" onClick={e => e.stopPropagation()}>
                         <h3 className="text-xl font-bold mb-4">{editingBlockId ? 'Edit Block' : 'Add New Block'}</h3>
                         <div className="space-y-4">
                             <input type="text" value={blockName} onChange={e => setBlockName(e.target.value)} placeholder="Block Name" className="w-full bg-white/5 rounded-xl p-3 border border-white/10 focus:ring-1 focus:ring-accent outline-none" />

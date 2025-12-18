@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 interface LocalBlock {
     id: string;
@@ -16,6 +16,9 @@ const PromptsPage: React.FC = () => {
     const [blockName, setBlockName] = useState('');
     const [blockContent, setBlockContent] = useState('');
     const [blockCopyId, setBlockCopyId] = useState<string | null>(null);
+    
+    // New Sorting State
+    const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
 
     useEffect(() => {
         try {
@@ -59,45 +62,82 @@ const PromptsPage: React.FC = () => {
         });
     };
 
+    // Sort Logic
+    const sortedBlocks = useMemo(() => {
+        return [...localBlocks].sort((a, b) => {
+            if (sortBy === 'name') {
+                return a.name.localeCompare(b.name);
+            }
+            // Sort by ID (timestamp) descending for "Last Created"
+            return b.id.localeCompare(a.id);
+        });
+    }, [localBlocks, sortBy]);
+
     return (
         <div className="h-full w-full flex flex-col p-4 bg-light-bg text-light-text dark:bg-dark-bg dark:text-dark-text overflow-hidden">
-            <header className="flex items-center mb-6 gap-2 flex-shrink-0">
-                <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
-                <h1 className="text-3xl font-bold">Prompts 📝</h1>
+            <header className="flex items-center justify-between mb-6 gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                    <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
+                    <h1 className="text-3xl font-bold">Prompts 📝</h1>
+                </div>
+                
+                {/* Sort Toggle Button */}
+                <button 
+                    onClick={() => setSortBy(prev => prev === 'date' ? 'name' : 'date')}
+                    className="p-2 rounded-full bg-white/5 dark:bg-black/20 hover:bg-accent/10 hover:text-accent transition-all flex items-center gap-1"
+                    title={`Sorting by: ${sortBy === 'date' ? 'Last Created' : 'Name'}`}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                    </svg>
+                    <span className="text-[10px] font-bold uppercase pr-1 hidden sm:inline">
+                        {sortBy === 'date' ? 'Newest' : 'A-Z'}
+                    </span>
+                </button>
             </header>
             
-            <div className="mb-4 flex-shrink-0">
-                <h2 className="text-xl font-bold">Custom Copy Blocks</h2>
-                <p className="text-sm text-gray-500">Reusable text blocks you can edit & copy anytime.</p>
-            </div>
-
-            <main className="flex-1 overflow-y-auto pb-24 space-y-3 no-scrollbar">
+            <div className="mb-4 flex-shrink-0 flex justify-between items-end">
+                <div>
+                    <h2 className="text-xl font-bold">Custom Copy Blocks</h2>
+                    <p className="text-sm text-gray-500">Reusable text segments for your chats.</p>
+                </div>
                 <button 
                     onClick={() => { setEditingBlockId(null); setBlockName(''); setBlockContent(''); setIsModalOpen(true); }} 
-                    className="w-full py-4 bg-accent/10 border border-dashed border-accent/40 rounded-2xl text-accent font-bold hover:bg-accent/20 transition-all flex items-center justify-center gap-2"
+                    className="h-10 w-10 bg-accent text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
+                    aria-label="Add Block"
                 >
-                    + Add Block
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/></svg>
                 </button>
+            </div>
 
-                {localBlocks.length > 0 ? (
-                    localBlocks.map(block => (
-                        <div key={block.id} className="bg-white/5 dark:bg-black/20 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-all">
-                            <div className="flex justify-between items-center mb-2">
-                                <h3 className="font-bold text-base truncate">{block.name}</h3>
-                                <div className="flex gap-1">
-                                    <button onClick={() => { setEditingBlockId(block.id); setBlockName(block.name); setBlockContent(block.content); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-accent rounded-lg"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"/></svg></button>
-                                    <button onClick={() => handleCopy(block.content, block.id)} className={`p-2 rounded-lg ${blockCopyId === block.id ? 'text-green-500' : 'text-gray-400 hover:text-white'}`}><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2"/></svg></button>
-                                    <button onClick={() => handleDelete(block.id)} className="p-2 text-gray-400 hover:text-red-500 rounded-lg"><svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+            <main className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+                {sortedBlocks.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                        {sortedBlocks.map(block => (
+                            <div key={block.id} className="bg-white/5 dark:bg-black/20 p-3 rounded-2xl border border-white/5 hover:border-white/10 transition-all flex flex-col h-40">
+                                <div className="flex justify-between items-center mb-1.5 min-w-0">
+                                    <h3 className="font-bold text-xs truncate flex-1 pr-1">{block.name}</h3>
+                                    <div className="flex gap-0.5 flex-shrink-0">
+                                        <button onClick={() => { setEditingBlockId(block.id); setBlockName(block.name); setBlockContent(block.content); setIsModalOpen(true); }} className="p-1 text-gray-400 hover:text-accent rounded-lg" title="Edit"><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z"/></svg></button>
+                                        <button onClick={() => handleDelete(block.id)} className="p-1 text-gray-400 hover:text-red-500 rounded-lg" title="Delete"><svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+                                    </div>
                                 </div>
+                                <div className="flex-1 bg-black/20 p-2 rounded-xl text-[10px] text-gray-400 font-mono whitespace-pre-wrap overflow-hidden relative leading-tight">
+                                    {block.content}
+                                    <div className="absolute inset-x-0 bottom-0 h-4 bg-gradient-to-t from-black/20 to-transparent"></div>
+                                </div>
+                                <button 
+                                    onClick={() => handleCopy(block.content, block.id)} 
+                                    className={`mt-2 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 ${blockCopyId === block.id ? 'bg-green-500 text-white' : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'}`}
+                                >
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2"/></svg>
+                                    {blockCopyId === block.id ? 'Copied' : 'Copy'}
+                                </button>
                             </div>
-                            <div className="bg-black/20 p-3 rounded-xl text-sm text-gray-400 font-mono whitespace-pre-wrap max-h-24 overflow-hidden relative">
-                                {block.content}
-                            </div>
-                            {blockCopyId === block.id && <p className="text-[10px] text-green-500 mt-1 font-bold">Copied to clipboard!</p>}
-                        </div>
-                    ))
+                        ))}
+                    </div>
                 ) : (
-                    <div className="text-center py-10 text-gray-500 italic text-sm">No custom blocks yet.</div>
+                    <div className="text-center py-20 text-gray-500 italic text-sm">No custom blocks yet. Click the + button to add one.</div>
                 )}
             </main>
 

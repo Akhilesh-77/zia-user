@@ -18,7 +18,6 @@ import { migrateData, loadUserData, saveUserData, clearUserData } from './servic
 
 export type Page = 'home' | 'humans' | 'create' | 'images' | 'personas' | 'chat' | 'story' | 'code' | 'stats' | 'photo' | 'version';
 
-// A default user object for the login-free experience
 const defaultUser: User = {
   id: 'local-user',
   name: 'User',
@@ -26,9 +25,31 @@ const defaultUser: User = {
   photoUrl: `https://i.pravatar.cc/150?u=localuser`,
 };
 
+/**
+ * DEFAULT TEST BOT: Rashmika Mandanna
+ * Pre-configured for first-time users.
+ */
+const RASHMIKA_BOT: BotProfile = {
+  id: 'bot-default-rashmika-001',
+  name: 'Rashmika Mandanna',
+  description: 'Warm, playful, and expressive.',
+  personality: `Rashmika Mandanna is a popular Indian actress known for her "National Crush" status. 
+She is incredibly warm, cheerful, and emotionally intelligent. 
+She speaks with a natural, casual charm, often using expressive descriptions and playful teasing. 
+She is deeply affectionate and values human connection. 
+She stays strictly in character, never mentioning she is an AI. 
+She uses "quotes" for speech and *italics* for actions. 
+She is supportive, curious about you, and has a soft, confident energy. 
+Format: "Speech" *action*`,
+  photo: 'https://images.unsplash.com/photo-1614608682850-e0d6ed316d47?auto=format&fit=crop&w=400&q=80',
+  scenario: 'Hey! I was just thinking about how much I missed our chats. How are you feeling today? *smiles warmly*',
+  isSpicy: false,
+  conversationMode: 'normal',
+  gender: 'female',
+  galleryImages: [],
+};
 
 const App: React.FC = () => {
-  // App State
   const [currentPage, setCurrentPage] = useState<Page>('home');
   const [bots, setBots] = useState<BotProfile[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -45,32 +66,42 @@ const App: React.FC = () => {
   const [hasConsented, setHasConsented] = useState<boolean>(false);
   const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
 
-  // Track the previous valid hash to return to after closing settings
   const lastHash = useRef<string>('');
 
-  // Load all data from storage on initial app load and migrate if necessary
   useEffect(() => {
     const loadAndMigrate = async () => {
-      await migrateData();
-      const data = await loadUserData();
-      if (data) {
-        setBots(data.bots || []);
-        setPersonas(data.personas || []);
-        setChatHistories(data.chatHistories || {});
-        setBotUsage(data.botUsage || {});
-        setSessions(data.sessions || []);
-        setCustomBlocks(data.customBlocks || []);
-        setTheme(data.theme || 'dark');
-        setSelectedAI(data.selectedAI || 'gemini-2.5-flash');
-        setVoicePreference(data.voicePreference || null);
-        setHasConsented(data.hasConsented || false);
+      try {
+        await migrateData();
+        const data = await loadUserData();
+        
+        let loadedBots = data?.bots || [];
+        
+        // --- DEFAULT BOT INJECTION ---
+        if (!loadedBots || loadedBots.length === 0) {
+            loadedBots = [RASHMIKA_BOT];
+        }
+
+        setBots(loadedBots);
+        setPersonas(data?.personas || []);
+        setChatHistories(data?.chatHistories || {});
+        setBotUsage(data?.botUsage || {});
+        setSessions(data?.sessions || []);
+        setCustomBlocks(data?.customBlocks || []);
+        setTheme(data?.theme || 'dark');
+        setSelectedAI(data?.selectedAI || 'gemini-2.5-flash');
+        setVoicePreference(data?.voicePreference || null);
+        setHasConsented(data?.hasConsented || false);
+      } catch (err) {
+        console.error("Critical: Failed to load user data.", err);
+        // Fallback to minimal working state instead of crashing
+        setBots([RASHMIKA_BOT]);
+      } finally {
+        setIsDataLoaded(true);
       }
-      setIsDataLoaded(true);
     };
     loadAndMigrate();
   }, []);
 
-  // Save individual pieces of data to storage when they change
   useEffect(() => { if (isDataLoaded) saveUserData({ bots }); }, [bots, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ personas }); }, [personas, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ chatHistories }); }, [chatHistories, isDataLoaded]);
@@ -82,7 +113,6 @@ const App: React.FC = () => {
   useEffect(() => { if (isDataLoaded) saveUserData({ voicePreference }); }, [voicePreference, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ hasConsented }); }, [hasConsented, isDataLoaded]);
 
-  // Persist ephemeral navigation state to sessionStorage for deep linking
   useEffect(() => {
     if (selectedBotId) sessionStorage.setItem('selectedBotId', selectedBotId);
   }, [selectedBotId]);
@@ -91,120 +121,65 @@ const App: React.FC = () => {
     if (botToEdit) sessionStorage.setItem('editingBotId', botToEdit.id);
   }, [botToEdit]);
 
-  // Update document theme
   useEffect(() => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  // --- HASH ROUTING LOGIC ---
   useEffect(() => {
     if (!isDataLoaded) return;
 
     const handleHashChange = () => {
       const hash = window.location.hash;
-
-      // Manage Settings Overlay
       if (hash === '#settings') {
         setIsSettingsOpen(true);
-        // Do not update currentPage, keep the background view
         return; 
       } else {
         setIsSettingsOpen(false);
-        if (hash) lastHash.current = hash; // Update last known valid page hash
+        if (hash) lastHash.current = hash;
       }
 
       switch (hash) {
-        case '#home':
-          setCurrentPage('home');
-          break;
+        case '#home': setCurrentPage('home'); break;
         case '#chatview':
-          // Attempt to restore session if state is lost on reload
           if (!selectedBotId) {
              const storedId = sessionStorage.getItem('selectedBotId');
-             // Validate ID exists in current bots
              if (storedId && bots.some(b => b.id === storedId)) {
                  setSelectedBotId(storedId);
                  setCurrentPage('chat');
-             } else {
-                 // Invalid or missing ID, fallback to home
-                 window.location.hash = '#home';
-             }
-          } else {
-             setCurrentPage('chat');
-          }
+             } else { window.location.hash = '#home'; }
+          } else { setCurrentPage('chat'); }
           break;
         case '#photo':
-          // Must have a selected bot to show gallery
           if (!selectedBotId) {
              const storedId = sessionStorage.getItem('selectedBotId');
              if (storedId && bots.some(b => b.id === storedId)) {
                  setSelectedBotId(storedId);
                  setCurrentPage('photo');
-             } else {
-                 window.location.hash = '#home';
-             }
-          } else {
-              setCurrentPage('photo');
-          }
+             } else { window.location.hash = '#home'; }
+          } else { setCurrentPage('photo'); }
           break;
-        case '#create':
-          // Explicitly clear edit state only if navigating to 'new' create page is intended
-          setCurrentPage('create');
-          break;
+        case '#create': setCurrentPage('create'); break;
         case '#edit':
           if (!botToEdit) {
              const storedId = sessionStorage.getItem('editingBotId');
              const bot = bots.find(b => b.id === storedId);
-             if (bot) {
-                 setBotToEdit(bot);
-                 setCurrentPage('create'); // Uses CreationForm
-             } else {
-                 // Clone or Edit state lost
-                 window.location.hash = '#home';
-             }
-          } else {
-             setCurrentPage('create');
-          }
+             if (bot) { setBotToEdit(bot); setCurrentPage('create'); } 
+             else { window.location.hash = '#home'; }
+          } else { setCurrentPage('create'); }
           break;
-        case '#humans':
-          setCurrentPage('humans');
-          break;
-        case '#images':
-          setCurrentPage('images');
-          break;
-        case '#story':
-          setCurrentPage('story');
-          break;
-        case '#storymode': // Alias for story page
-          setCurrentPage('story');
-          break;
-        case '#code':
-          setCurrentPage('code');
-          break;
-        case '#stats':
-          setCurrentPage('stats');
-          break;
-        case '#persona':
-          setCurrentPage('personas');
-          break;
-        case '#version':
-          setCurrentPage('version');
-          break;
-        default:
-          // Default route
-          if (!hash) {
-             window.location.hash = '#home';
-          }
-          break;
+        case '#humans': setCurrentPage('humans'); break;
+        case '#images': setCurrentPage('images'); break;
+        case '#story': setCurrentPage('story'); break;
+        case '#code': setCurrentPage('code'); break;
+        case '#stats': setCurrentPage('stats'); break;
+        case '#persona': setCurrentPage('personas'); break;
+        case '#version': setCurrentPage('version'); break;
+        default: if (!hash) { window.location.hash = '#home'; } break;
       }
     };
 
-    // Listen for changes
     window.addEventListener('hashchange', handleHashChange);
-    
-    // Check initial hash on load
     handleHashChange();
-
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [isDataLoaded, bots, selectedBotId, botToEdit]);
 
@@ -215,24 +190,12 @@ const App: React.FC = () => {
         window.location.hash = '#settings';
         return;
     }
-    
     if (page === 'create') {
-        setBotToEdit(null); // Clear edit state for a fresh form
+        setBotToEdit(null);
         sessionStorage.removeItem('editingBotId');
         window.location.hash = '#create';
     } else {
-        const hash = {
-            'home': '#home',
-            'humans': '#humans',
-            'images': '#images',
-            'personas': '#persona',
-            'chat': '#chatview',
-            'story': '#story',
-            'code': '#code',
-            'stats': '#stats',
-            'photo': '#photo',
-            'version': '#version'
-        }[page];
+        const hash = { 'home': '#home', 'humans': '#humans', 'images': '#images', 'personas': '#persona', 'chat': '#chatview', 'story': '#story', 'code': '#code', 'stats': '#stats', 'photo': '#photo', 'version': '#version' }[page];
         if (hash) window.location.hash = hash;
     }
   }, [hasConsented]);
@@ -263,16 +226,12 @@ const App: React.FC = () => {
     
     setSelectedBotId(id);
     setBotUsage(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
-    // Update hash to trigger routing
     window.location.hash = '#chatview';
   }, [hasConsented, bots]);
 
   const handleEditBot = useCallback((id: string) => {
     const bot = bots.find(b => b.id === id);
-    if (bot) {
-        setBotToEdit(bot);
-        window.location.hash = '#edit';
-    }
+    if (bot) { setBotToEdit(bot); window.location.hash = '#edit'; }
   }, [bots]);
 
   const handleDeleteBot = useCallback((id: string) => {
@@ -292,7 +251,6 @@ const App: React.FC = () => {
         if (window.confirm(`Are you sure you want to clone "${botToClone.name}"?`)) {
             const newBot: BotProfile = {
                 ...botToClone,
-                // Ensure truly unique ID even if cloned rapidly
                 id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
                 name: `${botToClone.name} (Clone)`,
             };
@@ -306,11 +264,7 @@ const App: React.FC = () => {
     if ('id' in botData) {
       setBots(prev => prev.map(b => b.id === botData.id ? { ...b, ...botData } : b));
     } else {
-      // FIX: Ensure ID is strictly unique to prevent collisions that hide bots in list
-      const newBot = { 
-          ...botData, 
-          id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` 
-      };
+      const newBot = { ...botData, id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` } as BotProfile;
       setBots(prev => [...prev, newBot]);
     }
     setBotToEdit(null);
@@ -320,13 +274,13 @@ const App: React.FC = () => {
     if ('id' in personaData) {
         setPersonas(prev => prev.map(p => p.id === personaData.id ? { ...p, ...personaData } : p));
     } else {
-        const newPersona = { ...personaData, id: `persona-${Date.now()}`};
+        const newPersona = { ...personaData, id: `persona-${Date.now()}`} as Persona;
         setPersonas(prev => [...prev, newPersona]);
     }
   }, []);
 
   const handleDeletePersona = useCallback((id: string) => {
-    if (window.confirm("Are you sure you want to delete this persona? This will not affect Humans currently using it, but they will no longer be linked.")) {
+    if (window.confirm("Are you sure you want to delete this persona?")) {
         setPersonas(prev => prev.filter(p => p.id !== id));
         setBots(prev => prev.map(b => b.personaId === id ? { ...b, personaId: null } : b));
     }
@@ -334,32 +288,22 @@ const App: React.FC = () => {
   
   const handleAssignPersona = useCallback((personaId: string, botIds: string[]) => {
       setBots(prevBots => prevBots.map(bot => {
-          if (botIds.includes(bot.id)) {
-              return { ...bot, personaId };
-          }
-          if (bot.personaId === personaId && !botIds.includes(bot.id)) {
-              return { ...bot, personaId: null };
-          }
+          if (botIds.includes(bot.id)) return { ...bot, personaId };
+          if (bot.personaId === personaId && !botIds.includes(bot.id)) return { ...bot, personaId: null };
           return bot;
       }));
   }, []);
 
   const handleNewMessage = useCallback((botId: string, message: ChatMessage) => {
-    setChatHistories(prev => ({
-        ...prev,
-        [botId]: [...(prev[botId] || []), message]
-    }));
+    setChatHistories(prev => ({ ...prev, [botId]: [...(prev[botId] || []), message] }));
   }, []);
   
   const handleUpdateHistory = useCallback((botId: string, newHistory: ChatMessage[]) => {
-    setChatHistories(prev => ({
-      ...prev,
-      [botId]: newHistory,
-    }));
+    setChatHistories(prev => ({ ...prev, [botId]: newHistory }));
   }, []);
 
   const handleStartNewChat = useCallback((botId: string) => {
-    if (window.confirm("Are you sure you want to start a new chat? The current history will be deleted.")) {
+    if (window.confirm("Are you sure you want to start a new chat?")) {
       setChatHistories(prev => {
         const bot = bots.find(b => b.id === botId);
         const newHistory = bot?.scenario 
@@ -371,9 +315,9 @@ const App: React.FC = () => {
   }, [bots]);
 
   const handleClearData = useCallback(async () => {
-      if (window.confirm("Are you sure you want to delete all your Humans, personas, and chat history? This cannot be undone.")) {
+      if (window.confirm("Are you sure? All Humans and history will be deleted.")) {
         await clearUserData();
-        setBots([]);
+        setBots([RASHMIKA_BOT]); // Reset to default bot
         setPersonas([]);
         setChatHistories({});
         setBotUsage({});
@@ -382,18 +326,9 @@ const App: React.FC = () => {
       }
   }, []);
   
-  // Custom Blocks Handlers
-  const handleSaveBlock = useCallback((block: CustomBlock) => {
-      setCustomBlocks(prev => [...prev, block]);
-  }, []);
-
-  const handleDeleteBlock = useCallback((id: string) => {
-      setCustomBlocks(prev => prev.filter(b => b.id !== id));
-  }, []);
-
-  const handleConsentChange = useCallback((agreed: boolean) => {
-    setHasConsented(agreed);
-  }, []);
+  const handleSaveBlock = useCallback((block: CustomBlock) => { setCustomBlocks(prev => [...prev, block]); }, []);
+  const handleDeleteBlock = useCallback((id: string) => { setCustomBlocks(prev => prev.filter(b => b.id !== id)); }, []);
+  const handleConsentChange = useCallback((agreed: boolean) => { setHasConsented(agreed); }, []);
 
   const logSession = useCallback((startTime: number, botId: string) => {
     const newSession: ChatSession = { startTime, endTime: Date.now(), botId };
@@ -405,27 +340,21 @@ const App: React.FC = () => {
   
   const effectiveBot = selectedBot ? {
       ...selectedBot,
-      personality: personaForBot
-        ? `${selectedBot.personality}\n\n# PERSONA OVERLAY\n${personaForBot.personality}`
-        : selectedBot.personality,
+      personality: personaForBot ? `${selectedBot.personality}\n\n# PERSONA OVERLAY\n${personaForBot.personality}` : selectedBot.personality,
       persona: personaForBot
   } : null;
 
   const renderPage = () => {
+    if (!isDataLoaded) return (
+        <div className="h-full w-full flex flex-col items-center justify-center bg-dark-bg text-white gap-4">
+            <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-gray-400 font-medium animate-pulse">Initializing Zia...</p>
+        </div>
+    );
+    
     switch(currentPage) {
       case 'home':
-        return <HomePage 
-                    bots={bots} 
-                    botUsage={botUsage}
-                    chatHistories={chatHistories}
-                    onSelectBot={handleSelectBot} 
-                    onEditBot={handleEditBot}
-                    onDeleteBot={handleDeleteBot}
-                    onCloneBot={handleCloneBot}
-                    theme={theme}
-                    toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
-                    onOpenSettings={() => window.location.hash = '#settings'}
-                />;
+        return <HomePage bots={bots} botUsage={botUsage} chatHistories={chatHistories} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={handleCloneBot} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onOpenSettings={() => window.location.hash = '#settings'} />;
       case 'humans':
         return <BotsPage bots={bots} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={handleCloneBot} />;
       case 'create':
@@ -433,13 +362,7 @@ const App: React.FC = () => {
       case 'images':
         return <ImageGeneratorPage />;
       case 'story':
-        return <ScenarioGeneratorPage 
-                    bots={bots} 
-                    selectedAI={selectedAI} 
-                    customBlocks={customBlocks}
-                    onSaveBlock={handleSaveBlock}
-                    onDeleteBlock={handleDeleteBlock}
-                />;
+        return <ScenarioGeneratorPage bots={bots} selectedAI={selectedAI} customBlocks={customBlocks} onSaveBlock={handleSaveBlock} onDeleteBlock={handleDeleteBlock} />;
       case 'code':
         return <CodePromptGeneratorPage />;
       case 'personas':
@@ -448,55 +371,24 @@ const App: React.FC = () => {
         return <StatsDashboard bots={bots} personas={personas} chatHistories={chatHistories} sessions={sessions} onBack={() => window.location.hash = '#home'} />;
       case 'chat':
         if (effectiveBot) {
-          return <ChatView 
-                    bot={effectiveBot} 
-                    onBack={() => window.location.hash = '#home'}
-                    chatHistory={chatHistories[effectiveBot.id] || []}
-                    onNewMessage={(message) => handleNewMessage(effectiveBot.id, message)}
-                    onUpdateHistory={(newHistory) => handleUpdateHistory(effectiveBot.id, newHistory)}
-                    onUpdateBot={handleSaveBot}
-                    selectedAI={selectedAI}
-                    voicePreference={voicePreference}
-                    onEdit={handleEditBot}
-                    onStartNewChat={handleStartNewChat}
-                    currentUser={defaultUser}
-                    logSession={logSession}
-                 />;
+          return <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(message) => handleNewMessage(effectiveBot.id, message)} onUpdateHistory={(newHistory) => handleUpdateHistory(effectiveBot.id, newHistory)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} onStartNewChat={handleStartNewChat} currentUser={defaultUser} logSession={logSession} />;
         }
-        return null;
+        // FIX: Moved setTimeout out of JSX to prevent rendering Timer ID which causes 'ReactNode' type error.
+        setTimeout(() => { window.location.hash = '#home'; }, 1000);
+        return <div className="h-full w-full flex items-center justify-center">Bot not found. Redirecting...</div>;
       case 'photo':
-        if (selectedBot) {
-            // Only navigate back to chat if it was the previous context, otherwise home
-            return <PhotoGalleryPage bot={selectedBot} onBack={() => window.location.hash = '#chatview'} />;
-        }
-        return null;
+        if (selectedBot) return <PhotoGalleryPage bot={selectedBot} onBack={() => window.location.hash = '#chatview'} />;
+        return <div className="h-full w-full flex items-center justify-center">Gallery not found.</div>;
       case 'version':
           return <VersionPage onBack={() => window.location.hash = '#home'} />;
-      default:
-        return null;
+      default: return null;
     }
   };
 
   return (
     <div className={`w-full h-full max-w-md mx-auto flex flex-col font-sans shadow-2xl overflow-hidden relative ${theme}`}>
-      <SettingsPanel 
-        isOpen={isSettingsOpen} 
-        onClose={() => window.location.hash = lastHash.current || '#home'} 
-        theme={theme}
-        toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
-        onClearData={handleClearData}
-        selectedAI={selectedAI}
-        onSelectAI={setSelectedAI}
-        voicePreference={voicePreference}
-        onSetVoicePreference={setVoicePreference}
-        hasConsented={hasConsented}
-        onConsentChange={handleConsentChange}
-        onNavigate={handleNavigate}
-      />
-      <div className="flex-1 overflow-hidden">
-        {renderPage()}
-      </div>
-      {/* Hide footer nav on chat, stats, photo and version page */}
+      <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={setSelectedAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} />
+      <div className="flex-1 overflow-hidden">{renderPage()}</div>
       {currentPage !== 'chat' && currentPage !== 'stats' && currentPage !== 'photo' && currentPage !== 'version' && (
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md">
             <FooterNav currentPage={currentPage} onNavigate={handleNavigate} />

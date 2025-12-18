@@ -55,10 +55,7 @@ const ChatSettingsModal: React.FC<{
 }
 
 const parseMessage = (text: string) => {
-    if (typeof text !== 'string') {
-      console.warn('parseMessage received non-string input:', text);
-      return '';
-    }
+    if (!text || typeof text !== 'string') return '';
     const parts = text.split(/(\*.*?\*)/g);
     return parts.map((part, index) => {
       if (part.startsWith('*') && part.endsWith('*')) {
@@ -81,17 +78,23 @@ const MessageItem = React.memo(({
     onRegenerate, 
     setPhotoToView 
 }: any) => {
+    const isSystem = msg.text?.includes("(System:");
+
     return (
         <div 
             className={`flex items-end gap-2 group ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} transition-opacity duration-300 ${deletingMessageId === msg.id ? 'opacity-0' : 'opacity-100'}`}
         >
-            {msg.sender === 'bot' && <img src={botAvatar} alt="Bot" className="h-10 w-10 rounded-lg object-cover self-start cursor-pointer" onClick={() => setPhotoToView(botAvatar)} onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />}
+            {msg.sender === 'bot' && !isSystem && <img src={botAvatar} alt="Bot" className="h-10 w-10 rounded-lg object-cover self-start cursor-pointer" onClick={() => setPhotoToView(botAvatar)} onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />}
             
             <div className={`flex items-center gap-2 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div className={`max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-2xl ${msg.sender === 'user' ? 'bg-accent text-white rounded-br-none' : 'bg-white/10 dark:bg-black/20 rounded-bl-none'}`}>
+                <div className={`max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-2xl ${
+                    isSystem ? 'bg-red-900/20 text-red-400 border border-red-800/30 w-full text-center' :
+                    msg.sender === 'user' ? 'bg-accent text-white rounded-br-none' : 
+                    'bg-white/10 dark:bg-black/20 rounded-bl-none'
+                }`}>
                     <p className="whitespace-pre-wrap">{parseMessage(msg.text)}</p>
                 </div>
-                 {msg.sender === 'user' && (
+                 {msg.sender === 'user' && !isSystem && (
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => onCopy(msg.text, msg.id)} className="p-1 rounded-full bg-black/30 hover:bg-accent" aria-label="Copy message">
                             {copiedMessageId === msg.id ? (
@@ -105,7 +108,7 @@ const MessageItem = React.memo(({
                         </button>
                     </div>
                 )}
-                {msg.sender === 'bot' && (
+                {msg.sender === 'bot' && !isSystem && (
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => onPlay(msg.text)} className="p-1 rounded-full bg-black/30 hover:bg-accent" aria-label="Play voice"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.108 12 5v14c0 .892-1.077 1.337-1.707.707L5.586 15z" /></svg></button>
                         <button onClick={() => onRegenerate(msg.id)} className="p-1 rounded-full bg-black/30 hover:bg-accent" aria-label="Regenerate response"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg></button>
@@ -116,7 +119,7 @@ const MessageItem = React.memo(({
                 )}
             </div>
 
-            {msg.sender === 'user' && <img src={userAvatar} alt={userAvatarAlt} className="h-10 w-10 rounded-lg object-cover self-start cursor-pointer" onClick={() => setPhotoToView(userAvatar)} onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />}
+            {msg.sender === 'user' && !isSystem && <img src={userAvatar} alt={userAvatarAlt} className="h-10 w-10 rounded-lg object-cover self-start cursor-pointer" onClick={() => setPhotoToView(userAvatar)} onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />}
         </div>
     );
 });
@@ -160,7 +163,6 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   }, [bot]);
 
   useEffect(() => {
-    // Log session start time on mount and log end time on unmount
     const startTime = Date.now();
     return () => {
       logSession(startTime, bot.id);
@@ -200,6 +202,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
 
 
   const handlePlayVoice = useCallback((text: string) => {
+    if (!text) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     if (voicePreference && voices.length > 0) {
@@ -228,7 +231,6 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
     setIsTyping(true);
 
     try {
-      // Pass the updated bot profile properties including mode and gender
       const botResponseText = await generateBotResponse(
           newHistory, 
           { 
@@ -250,10 +252,10 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       onNewMessage(finalBotMessage);
 
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("ChatView send error:", error);
       onNewMessage({
         id: `error-${Date.now()}`,
-        text: "Sorry, I encountered an error. Please try again.",
+        text: "(System: Something went wrong. Please resend your message.)",
         sender: 'bot',
         timestamp: Date.now()
       });
@@ -263,6 +265,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   };
 
   const handleCopyMessage = useCallback((text: string, messageId: string) => {
+    if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
         setCopiedMessageId(messageId);
         setTimeout(() => setCopiedMessageId(null), 2000);
@@ -287,7 +290,6 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       const historyForRegen = chatHistory.slice(0, messageIndex);
       setIsTyping(true);
       try {
-          // Pass the updated bot profile properties for regeneration too
           const botResponseText = await generateBotResponse(
               historyForRegen, 
               { 
@@ -304,11 +306,11 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
           newHistory[messageIndex] = { ...newHistory[messageIndex], text: botResponseText, timestamp: Date.now() };
           onUpdateHistory(newHistory);
       } catch (error) {
-          console.error("Error regenerating message:", error);
+          console.error("Regeneration error:", error);
       } finally {
           setIsTyping(false);
       }
-  }, [chatHistory, bot.name, bot.personality, bot.isSpicy, bot.conversationMode, bot.gender, selectedAI, onUpdateHistory]);
+  }, [chatHistory, bot, selectedAI, onUpdateHistory]);
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();

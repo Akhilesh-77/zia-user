@@ -138,9 +138,10 @@ interface ChatViewProps {
   currentUser: User;
   logSession: (startTime: number, botId: string) => void;
   updateGeminiUsage: (modelId: string, isQuotaExceeded: boolean) => void;
+  botReplyDelay: number;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession, updateGeminiUsage }) => {
+const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession, updateGeminiUsage, botReplyDelay }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -154,6 +155,12 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   
   const menuRef = useRef<HTMLDivElement>(null);
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
   
   const botAvatar = bot.photo; 
   const userAvatar = bot.persona?.photo || currentUser.photoUrl; 
@@ -246,24 +253,39 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
           () => updateGeminiUsage(selectedAI, true)
       );
 
-      const finalBotMessage: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        text: botResponseText,
-        sender: 'bot',
-        timestamp: Date.now(),
-      };
-      onNewMessage(finalBotMessage);
+      // --- CRASH-SAFE DELAY LOGIC ---
+      if (isMounted.current && botReplyDelay > 0) {
+          try {
+              await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
+          } catch (e) {
+              console.warn("Delay timer failed, proceeding instantly", e);
+          }
+      }
+
+      if (isMounted.current) {
+        const finalBotMessage: ChatMessage = {
+          id: `bot-${Date.now()}`,
+          text: botResponseText,
+          sender: 'bot',
+          timestamp: Date.now(),
+        };
+        onNewMessage(finalBotMessage);
+      }
 
     } catch (error) {
       console.error("ChatView send error:", error);
-      onNewMessage({
-        id: `error-${Date.now()}`,
-        text: "(System: Something went wrong. Please resend your message.)",
-        sender: 'bot',
-        timestamp: Date.now()
-      });
+      if (isMounted.current) {
+        onNewMessage({
+            id: `error-${Date.now()}`,
+            text: "(System: Something went wrong. Please resend your message.)",
+            sender: 'bot',
+            timestamp: Date.now()
+        });
+      }
     } finally {
-      setIsTyping(false);
+      if (isMounted.current) {
+        setIsTyping(false);
+      }
     }
   };
 
@@ -307,15 +329,23 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
               () => updateGeminiUsage(selectedAI, true)
           );
           
-          const newHistory = [...chatHistory];
-          newHistory[messageIndex] = { ...newHistory[messageIndex], text: botResponseText, timestamp: Date.now() };
-          onUpdateHistory(newHistory);
+          if (isMounted.current && botReplyDelay > 0) {
+              await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
+          }
+
+          if (isMounted.current) {
+            const newHistory = [...chatHistory];
+            newHistory[messageIndex] = { ...newHistory[messageIndex], text: botResponseText, timestamp: Date.now() };
+            onUpdateHistory(newHistory);
+          }
       } catch (error) {
           console.error("Regeneration error:", error);
       } finally {
-          setIsTyping(false);
+          if (isMounted.current) {
+            setIsTyping(false);
+          }
       }
-  }, [chatHistory, bot, selectedAI, onUpdateHistory, updateGeminiUsage]);
+  }, [chatHistory, bot, selectedAI, onUpdateHistory, updateGeminiUsage, botReplyDelay]);
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();

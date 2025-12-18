@@ -18,11 +18,16 @@ interface SettingsPanelProps {
   onConsentChange: (agreed: boolean) => void;
   onNavigate: (page: Page) => void;
   geminiUsage: GeminiUsage;
+  botReplyDelay: number;
+  onSetBotReplyDelay: (delay: number) => void;
 }
 
 // Model Display Config
+// FIX: Added gemini-3 series to the UI options.
 const aiModelOptions: { id: AIModelOption, name: string, quotaLimit?: number }[] = [
     { id: 'local-offline', name: '⚡ Local / Offline (Privacy Mode)' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Next Gen)', quotaLimit: 20 },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Complex Tasks)', quotaLimit: 5 },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', quotaLimit: 15 },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', quotaLimit: 2 },
     { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)', quotaLimit: 15 },
@@ -56,7 +61,7 @@ const GeminiUsageItem: React.FC<{ modelName: string; count: number; limit: numbe
     );
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, toggleTheme, onClearData, selectedAI, onSelectAI, voicePreference, onSetVoicePreference, hasConsented, onConsentChange, onNavigate, geminiUsage }) => {
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, toggleTheme, onClearData, selectedAI, onSelectAI, voicePreference, onSetVoicePreference, hasConsented, onConsentChange, onNavigate, geminiUsage, botReplyDelay, onSetBotReplyDelay }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isDisclaimerExpanded, setIsDisclaimerExpanded] = useState(false);
   const [isUsageExpanded, setIsUsageExpanded] = useState(false);
@@ -128,6 +133,28 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                     )}
                 </div>
 
+                {/* BOT REPLY DELAY SLIDER */}
+                <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="font-medium">Bot Reply Delay</span>
+                        <span className="text-accent font-bold">{botReplyDelay}s</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mb-3">Artificial thinking time for realistic replies.</p>
+                    <input 
+                        type="range"
+                        min="0"
+                        max="60"
+                        step="1"
+                        value={botReplyDelay}
+                        onChange={(e) => onSetBotReplyDelay(parseInt(e.target.value, 10))}
+                        className="w-full h-1.5 bg-black/30 rounded-lg appearance-none cursor-pointer accent-accent"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                        <span>Instant</span>
+                        <span>1 min</span>
+                    </div>
+                </div>
+
                 <div className="flex justify-between items-center bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <span className="font-medium">Theme</span>
                     <button onClick={toggleTheme} className="flex items-center gap-2">
@@ -172,7 +199,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                                     name="ai-model" 
                                     value={option.id}
                                     checked={selectedAI === option.id}
-                                    onChange={() => onSelectAI(option.id)}
+                                    onChange={() => onSelectAI(option.id as AIModelOption)}
                                     className="h-4 w-4 text-accent bg-gray-700 border-gray-600 focus:ring-accent"
                                 />
                                 <span className="ml-3 text-sm">{option.name}</span>

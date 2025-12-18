@@ -2,6 +2,8 @@
 // FIX: Removed self-import of 'BotProfile' which was causing a conflict with its local declaration.
 
 export type AIModelOption = 
+  | 'gemini-3-flash-preview'
+  | 'gemini-3-pro-preview'
   | 'gemini-2.5-flash' 
   | 'gemini-2.5-pro' 
   | 'gemini-flash-latest' 
@@ -22,6 +24,12 @@ export interface User {
   name: string;
   email: string;
   photoUrl: string;
+}
+
+export interface SavedPrompt {
+  id: string;
+  title: string;
+  content: string;
 }
 
 export interface BotProfile {

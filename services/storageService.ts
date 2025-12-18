@@ -17,6 +17,7 @@ interface UserData {
     sessions: ChatSession[];
     customBlocks: CustomBlock[];
     geminiUsage: GeminiUsage;
+    botReplyDelay: number;
 }
 
 const OLD_STORAGE_KEY = 'zia_userData';
@@ -35,6 +36,7 @@ const KEYS: { [K in keyof UserData]: string } = {
     sessions: 'zia_sessions',
     customBlocks: 'zia_customBlocks',
     geminiUsage: 'zia_geminiUsage',
+    botReplyDelay: 'zia_botReplyDelay',
 };
 
 

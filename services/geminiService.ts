@@ -1,370 +1,162 @@
 
-import { GoogleGenAI, Content, Part, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { ChatMessage, AIModelOption, BotProfile } from "../types";
 import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🔑 AUTHENTICATION SETUP (ENV VARIABLES)
+// 🔑 AUTHENTICATION SETUP (STRICT: process.env.API_KEY ONLY)
 // ------------------------------------------------------------------
-
-const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
-
-// Gemini API Instance - Safe Initialization
 const getGeminiClient = () => {
-  const key = process.env.API_KEY || process.env.GEMINI_API_KEY || "missing-key";
+  const key = process.env.API_KEY;
+  if (!key) throw new Error("API_KEY environment variable is missing.");
   return new GoogleGenAI({ apiKey: key });
 };
 
 // ------------------------------------------------------------------
 // 🛠️ ERROR HANDLING & RECOVERY
 // ------------------------------------------------------------------
-
-/**
- * Maps technical API/Network errors to user-friendly system messages.
- * Prevents app crashes by returning a safe string.
- */
 const mapErrorToMessage = (error: any): string => {
     const msg = String(error?.message || error || "").toLowerCase();
     console.error("Zia.ai System Error:", error);
 
-    // Auth & Keys
-    if (msg.includes("api key missing") || msg.includes("invalid_key") || msg.includes("401") || msg.includes("missing-key") || msg.includes("unauthorized")) {
-        return "(System: Service configuration issue. Please check API settings.)";
-    }
-    // Limits
-    if (msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("limit reached") || msg.includes("exhausted")) {
+    if (msg.includes("429") || msg.includes("quota") || msg.includes("limit reached")) {
         return "(System: Daily limit reached. Try again later or switch AI model.)";
     }
-    // Server Issues
-    if (msg.includes("500") || msg.includes("503") || msg.includes("504") || msg.includes("overloaded") || msg.includes("busy") || msg.includes("deadline")) {
-        return "(System: System is busy right now. Please try again in a few seconds.)";
+    if (msg.includes("network") || msg.includes("fetch")) {
+        return "(System: Connection issue detected. Check your network.)";
     }
-    // Connectivity
-    if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed to fetch") || msg.includes("offline") || msg.includes("connection")) {
-        return "(System: Connection issue detected. Check your network and try again.)";
-    }
-    // Content/Parsing
-    if (msg.includes("empty response") || msg.includes("undefined") || msg.includes("null") || msg.includes("unexpected token") || msg.includes("parse")) {
-        return "(System: Something went wrong with the response. Please resend your message.)";
-    }
-    // Safety Filters
-    if (msg.includes("safety") || msg.includes("blocked") || msg.includes("candidate")) {
-        return "(System: Message blocked by safety filters. Try rephrasing.)";
-    }
-    
     return "(System: Something went wrong. Please resend your message.)";
 };
 
+// ------------------------------------------------------------------
+// 🤖 CORE AI LOGIC (REMAINING ALLOWED API USAGE)
+// ------------------------------------------------------------------
+
 /**
- * Checks if an error is related to quota or rate limits.
+ * Generates the chatbot's response using the selected model.
+ * This is the ONLY function allowed to consume API quota.
  */
-export const isQuotaError = (error: any): boolean => {
-    const msg = String(error?.message || error || "").toLowerCase();
-    return msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("limit reached") || msg.includes("exhausted");
-};
-
-const fileToGenerativePart = (base64Data: string, mimeType: string): Part => {
-  try {
-      if (!base64Data) return { inlineData: { data: "", mimeType: "image/jpeg" } };
-      return {
-        inlineData: {
-          data: base64Data.includes(',') ? base64Data.split(',')[1] : base64Data,
-          mimeType
-        },
-      };
-  } catch (e) {
-      return { inlineData: { data: "", mimeType: "image/jpeg" } };
-  }
-};
-
-const RETRY_DELAYS = [1000, 2000];
-
-async function retry<T>(fn: () => Promise<T>): Promise<T> {
-  let lastError: any;
-  for (let i = 0; i < RETRY_DELAYS.length; i++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      lastError = error;
-      const msg = String(error?.message || "").toLowerCase();
-      // Don't retry on auth, quota or user-missing errors
-      if (msg.includes("missing") || msg.includes("401") || msg.includes("invalid") || msg.includes("unauthorized") || isQuotaError(error)) throw error;
-      if (i < RETRY_DELAYS.length - 1) {
-          await new Promise(res => setTimeout(res, RETRY_DELAYS[i]));
-      }
-    }
-  }
-  throw lastError;
-}
-
-// ------------------------------------------------------------------
-// 🟣 DEEPSEEK LOGIC (Direct)
-// ------------------------------------------------------------------
-
-const callDeepSeek = async (
-  systemPrompt: string,
-  history: ChatMessage[]
-): Promise<string> => {
-  if (!DEEPSEEK_KEY) throw new Error("api key missing");
-
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history.slice(-10).map(msg => ({ 
-      role: msg.sender === 'user' ? 'user' : 'assistant',
-      content: msg.text || ""
-    }))
-  ];
-
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${DEEPSEEK_KEY}`
-    },
-    body: JSON.stringify({
-      model: "deepseek-chat",
-      messages,
-      temperature: 1.0,
-      max_tokens: 2048
-    })
-  });
-
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
-};
-
-// ------------------------------------------------------------------
-// 🌐 OPENROUTER LOGIC
-// ------------------------------------------------------------------
-
-const OPENROUTER_MODELS: Record<string, string> = {
-    'venice-dolphin-mistral-24b': 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free',
-    'mistralai-devstral-2512': 'mistralai/devstral-2512:free',
-    'deepseek-r1-free': 'tngtech/deepseek-r1t2-chimera:free'
-};
-
-const callOpenRouter = async (
-  modelId: string,
-  systemPrompt: string,
-  history: ChatMessage[]
-): Promise<string> => {
-  if (!OPENROUTER_KEY) throw new Error("api key missing");
-  const model = OPENROUTER_MODELS[modelId];
-  if (!model) throw new Error("model not found");
-
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENROUTER_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://zia.ai",
-      "X-Title": "Zia.ai"
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...history.slice(-10).map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text || "" }))
-      ],
-      temperature: 0.9
-    })
-  });
-
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || "";
-};
-
-// ------------------------------------------------------------------
-// ✨ GEMINI CORE LOGIC
-// ------------------------------------------------------------------
-
-const callGeminiText = async (
-  systemPrompt: string,
-  history: ChatMessage[],
-  model: string
-): Promise<string> => {
-  const ai = getGeminiClient();
-  
-  const contents: Content[] = history.slice(-15).map(msg => ({
-    role: msg.sender === "user" ? "user" : "model",
-    parts: [{ text: msg.text || "" }]
-  }));
-
-  if (contents.length === 0) contents.push({ role: "user", parts: [{ text: "Hello." }] });
-
-  const response = await ai.models.generateContent({
-    model: model,
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature: 0.9,
-      maxOutputTokens: 2048
-    },
-  });
-
-  if (!response || !response.text) throw new Error("empty response");
-  return response.text.trim();
-};
-
-// ------------------------------------------------------------------
-// 🔀 MAIN GENERATION ROUTER
-// ------------------------------------------------------------------
-
-const generateText = async (
-  systemPrompt: string,
-  history: ChatMessage[],
-  selectedAI: AIModelOption,
-  onSuccess?: () => void,
-  onQuotaExceeded?: (err: any) => void
-): Promise<string> => {
-  try {
-    // 1. ROUTE TO LOCAL OFFLINE
-    if (selectedAI === 'local-offline') {
-        const res = processLocalResponse(history, { name: "Zia", personality: systemPrompt, conversationMode: 'normal', gender: 'female' });
-        onSuccess?.();
-        return res;
-    }
-
-    // 2. ROUTE TO DEEPSEEK
-    if (selectedAI === 'deepseek-chat') {
-      const res = await retry(() => callDeepSeek(systemPrompt, history));
-      onSuccess?.();
-      return res;
-    }
-
-    // 3. ROUTE TO OPENROUTER
-    if (selectedAI in OPENROUTER_MODELS) {
-      const res = await retry(() => callOpenRouter(selectedAI, systemPrompt, history));
-      onSuccess?.();
-      return res;
-    }
-
-    // 4. ROUTE TO GEMINI (With Failover)
-    try {
-      const res = await retry(() => callGeminiText(systemPrompt, history, selectedAI));
-      onSuccess?.();
-      return res;
-    } catch (gemErr) {
-      if (isQuotaError(gemErr)) {
-          onQuotaExceeded?.(gemErr);
-      }
-      
-      // If Gemini fails, try DeepSeek as last resort if key exists
-      if (DEEPSEEK_KEY && selectedAI.includes('gemini')) {
-          console.warn("Gemini failed, falling back to DeepSeek...");
-          const res = await callDeepSeek(systemPrompt, history);
-          onSuccess?.();
-          return res;
-      }
-      throw gemErr;
-    }
-  } catch (err) {
-    if (isQuotaError(err)) {
-        onQuotaExceeded?.(err);
-    }
-    return mapErrorToMessage(err);
-  }
-};
-
+// FIX: Updated default modelId to 'gemini-3-flash-preview' and improved model selection logic.
 export const generateBotResponse = async (
-  history: ChatMessage[],
-  botProfile: Pick<BotProfile, "name" | "personality" | "isSpicy" | "conversationMode" | "gender">,
-  selectedAI: AIModelOption,
-  onSuccess?: () => void,
-  onQuotaExceeded?: (err: any) => void
+    history: ChatMessage[],
+    bot: Pick<BotProfile, 'name' | 'personality' | 'isSpicy' | 'conversationMode' | 'gender'>,
+    modelId: AIModelOption = 'gemini-3-flash-preview',
+    onSuccess?: () => void,
+    onQuotaExceeded?: () => void
 ): Promise<string> => {
-  if (!botProfile) return "(System: Bot profile missing.)";
-  
-  try {
-    if (selectedAI === 'local-offline') {
-        await new Promise(res => setTimeout(res, 400 + Math.random() * 400));
+    
+    // --- LOCAL BRAIN FALLBACK ---
+    if (modelId === 'local-offline') {
+        return processLocalResponse(history, bot);
+    }
+
+    try {
+        const lastUserMessage = history.filter(m => m.sender === 'user').pop()?.text || "";
+        
+        // Prepare instruction via xyz.ts helper (preserves previous behaviors)
+        const systemInstruction = xyz(
+            history, 
+            lastUserMessage, 
+            bot.personality, 
+            bot.conversationMode || (bot.isSpicy ? 'spicy' : 'normal'),
+            bot.gender || 'female'
+        );
+
+        const ai = getGeminiClient();
+        
+        // FIX: Dynamically select model based on modelId or fallback to gemini-3-flash-preview.
+        const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
+
+        const response = await ai.models.generateContent({
+            model: activeModel,
+            contents: history.map(m => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: m.text }]
+            })),
+            config: {
+                systemInstruction,
+                temperature: 0.9,
+                topP: 0.95,
+                topK: 40,
+            }
+        });
+
+        // FIX: Access response.text directly (property, not a method).
+        const text = response.text || "(The human is lost in thought...)";
         onSuccess?.();
-        return processLocalResponse(history, botProfile);
+        return text;
+
+    } catch (error: any) {
+        const errorMsg = String(error?.message || "").toLowerCase();
+        if (errorMsg.includes("429") || errorMsg.includes("quota")) {
+            onQuotaExceeded?.();
+        }
+        return mapErrorToMessage(error);
     }
-
-    const mode = botProfile.conversationMode || (botProfile.isSpicy ? 'spicy' : 'normal');
-    const gender = botProfile.gender || 'female';
-
-    const enhancedPrompt = xyz(
-      history,
-      history[history.length - 1]?.text || "",
-      botProfile.personality || "A helpful human-like Mate.",
-      mode,
-      gender
-    );
-
-    return await generateText(enhancedPrompt, history, selectedAI, onSuccess, onQuotaExceeded);
-  } catch (error) {
-    if (isQuotaError(error)) {
-        onQuotaExceeded?.(error);
-    }
-    return mapErrorToMessage(error);
-  }
 };
 
-export const generateUserResponseSuggestion = async () => "";
+/**
+ * FIXED: Local description generator to replace API-eating version.
+ * Now returns a clean excerpt from personality to save quota.
+ */
+export const generateDynamicDescription = async (personality: string): Promise<string> => {
+    // Extract a short, catchy sentence from the start of the personality prompt
+    if (!personality) return "A unique AI persona.";
+    
+    const firstSentence = personality.split(/[.!?]/)[0].trim();
+    return firstSentence.length > 60 ? firstSentence.substring(0, 57) + "..." : firstSentence;
+};
 
-export async function generateDynamicDescription(personality: string): Promise<string> { 
-    try {
-        if (!personality) return "A unique personality.";
-        // Avoid excessive API calls for description; return a friendly placeholder or simple snippet
-        return "Thinking about you...";
-    } catch (e) {
-        return "A unique personality.";
-    }
-}
+// ------------------------------------------------------------------
+// 🛑 IMAGE & CODE TOOLS (RE-ENABLED FOLLOWING SDK GUIDELINES)
+// ------------------------------------------------------------------
 
-export async function generateScenarioIdea(personalities: string[] = []): Promise<string> { 
-    try {
-        const prompt = `Generate a short, one-sentence creative scenario for a roleplay based on these character traits: ${personalities.join(", ")}`;
-        return await generateText(prompt, [], 'gemini-2.5-flash');
-    } catch (e) {
-        return "A sudden encounter leads to unexpected chaos."; 
-    }
-}
-
-export async function generateImage(prompt: string, sourceImage: string | null): Promise<string> {
-  try {
+// FIX: Implemented generateImage using gemini-2.5-flash-image and correct part handling.
+export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
     const ai = getGeminiClient();
-    const parts: Part[] = [{ text: prompt }];
-    if (sourceImage) parts.unshift(fileToGenerativePart(sourceImage, "image/jpeg"));
-    
+    const parts: any[] = [{ text: prompt }];
+
+    if (sourceImage) {
+        const [mimeInfo, base64Data] = sourceImage.split(',');
+        const mimeType = mimeInfo.match(/:(.*?);/)?.[1] || 'image/png';
+        parts.unshift({
+            inlineData: {
+                mimeType,
+                data: base64Data
+            }
+        });
+    }
+
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: { parts },
-      config: { responseModalities: [Modality.IMAGE] }
+        model: 'gemini-2.5-flash-image',
+        contents: { parts }
     });
-    
+
     if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData) return part.inlineData.data;
+            if (part.inlineData) {
+                return part.inlineData.data;
+            }
         }
     }
-    throw new Error("empty response");
-  } catch (err) {
-    throw new Error(mapErrorToMessage(err));
-  }
-}
+    throw new Error("No image was generated by the model.");
+};
 
-export async function generateStory(characters: any, otherNames: string[], scenario: string, selectedAI: AIModelOption) {
-  try {
-      const charNames = characters.map((c:any)=>c.name).join(", ") + (otherNames.length ? ", " + otherNames.join(", ") : "");
-      const prompt = `Write a creative short story scenario.\nContext: ${scenario}\nCharacters involved: ${charNames}\nStay in character and focus on dialogue and descriptive actions.`;
-      return await generateText(prompt, [], selectedAI);
-  } catch (e) {
-      return mapErrorToMessage(e);
-  }
-}
+// FIX: Stubbed generateScenario to prevent errors in components while keeping it minimal.
+export const generateScenario = async (): Promise<string> => {
+    return "Scenario generation is disabled. Please write your own opening message!";
+};
 
-export async function generateCodePrompt(task: string, language: string) {
-    try {
-        return await generateText(`Generate a detailed engineering prompt for ${task} in ${language}. Describe the requirements, architecture, and constraints clearly.`, [], 'gemini-2.5-flash');
-    } catch (e) {
-        return mapErrorToMessage(e);
-    }
-}
+// FIX: Implemented generateCodePrompt using gemini-3-pro-preview for complex reasoning.
+export const generateCodePrompt = async (task: string, language: string): Promise<string> => {
+    const ai = getGeminiClient();
+    const prompt = `Generate a highly detailed and optimized prompt that can be used to write production-ready code for the following task: "${task}". Target language/framework: "${language}".`;
+    
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: prompt
+    });
+
+    return response.text || "Failed to generate a detailed code prompt.";
+};

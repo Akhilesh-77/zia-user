@@ -110,7 +110,6 @@ const MessageItem = React.memo(({
                 )}
                 {msg.sender === 'bot' && !isSystem && (
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* FIX: Use 'onPlay' prop instead of 'handlePlayVoice' which is not defined in this scope */}
                         <button onClick={() => onPlay(msg.text)} className="p-1 rounded-full bg-black/30 hover:bg-accent" aria-label="Play voice"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.108 12 5v14c0 .892-1.077 1.337-1.707.707L5.586 15z" /></svg></button>
                         <button onClick={() => onRegenerate(msg.id)} className="p-1 rounded-full bg-black/30 hover:bg-accent" aria-label="Regenerate response"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg></button>
                         <button onClick={() => onDelete(msg.id)} className="p-1 rounded-full bg-black/30 hover:bg-red-500" aria-label="Delete message">
@@ -145,6 +144,7 @@ interface ChatViewProps {
 const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession, updateGeminiUsage, botReplyDelay }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [thinkingText, setThinkingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [photoToView, setPhotoToView] = useState<string | null>(null);
@@ -162,13 +162,40 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
     isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
+
+  // --- CRASH-SAFE THINKING CYCLE (Refined for human-like realism) ---
+  useEffect(() => {
+      let interval: any;
+      if (isTyping) {
+          const humanReflections = [
+              "Quietly sensing", "Thinking", "❤️❤️","😍", "🙌😒","Warm reflection", "Looking inward", "Searching for words", 
+              "A soft pause", "Gently wondering", "Feeling the moment", "Sensing the vibe", 
+              "Drifting in thought", "A quiet breath", "Noticing a feeling", "Brief hesitation", 
+              "Inner silence", "Patiently listening", "Softly aware", "Loving"
+          ];
+          
+          let lastIdx = -1;
+          const pick = () => {
+              let newIdx;
+              do {
+                  newIdx = Math.floor(Math.random() * humanReflections.length);
+              } while (newIdx === lastIdx && humanReflections.length > 1);
+              lastIdx = newIdx;
+              setThinkingText(humanReflections[newIdx]);
+          };
+          
+          pick();
+          interval = setInterval(pick, 2200); // Slightly slower for more human pace
+      } else {
+          setThinkingText('');
+      }
+      return () => { if (interval) clearInterval(interval); };
+  }, [isTyping]);
   
   const botAvatar = bot.photo; 
   const userAvatar = bot.persona?.photo || currentUser.photoUrl; 
   const userAvatarAlt = bot.persona?.name || currentUser.name || 'User';
 
-  // FIX: Gallery trigger now only looks for additional creation images.
-  // Profile photo and background are excluded as requested.
   const hasGalleryImages = useMemo(() => {
      return !!(bot.galleryImages?.length || bot.originalGalleryImages?.length);
   }, [bot]);
@@ -256,7 +283,6 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
           () => updateGeminiUsage(selectedAI, true)
       );
 
-      // --- CRASH-SAFE DELAY LOGIC ---
       if (isMounted.current && botReplyDelay > 0) {
           try {
               await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
@@ -464,14 +490,12 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
         ))}
 
         {isTyping && (
-          <div className="flex items-end gap-2 justify-start">
+          <div className="flex items-end gap-2 justify-start animate-fadeIn">
             <img src={botAvatar} alt={bot.name} className="h-10 w-10 rounded-lg object-cover" onError={(e) => (e.target as HTMLImageElement).src = 'https://via.placeholder.com/40'} />
-            <div className="max-w-xs p-3 rounded-2xl bg-white/10 dark:bg-black/20 rounded-bl-none">
-                <div className="flex items-center justify-center space-x-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                </div>
+            <div className="max-w-xs p-3 rounded-2xl bg-white/10 dark:bg-black/20 rounded-bl-none flex items-center min-h-[48px]">
+                <p className="text-sm italic opacity-70 font-medium transition-all duration-700 ease-in-out">
+                    {thinkingText}
+                </p>
             </div>
           </div>
         )}

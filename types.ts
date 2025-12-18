@@ -70,3 +70,15 @@ export interface CustomBlock {
     name: string;
     description: string;
 }
+
+export interface ModelUsage {
+    count: number;
+    limitReached: boolean;
+    lastError?: string;
+}
+
+export interface GeminiUsage {
+    [date: string]: {
+        [modelId: string]: ModelUsage;
+    }
+}

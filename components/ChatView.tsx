@@ -137,9 +137,10 @@ interface ChatViewProps {
   onStartNewChat: (id: string) => void;
   currentUser: User;
   logSession: (startTime: number, botId: string) => void;
+  updateGeminiUsage: (modelId: string, isQuotaExceeded: boolean) => void;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession }) => {
+const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession, updateGeminiUsage }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -240,7 +241,9 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
               conversationMode: bot.conversationMode,
               gender: bot.gender
           }, 
-          selectedAI
+          selectedAI,
+          () => updateGeminiUsage(selectedAI, false),
+          () => updateGeminiUsage(selectedAI, true)
       );
 
       const finalBotMessage: ChatMessage = {
@@ -299,7 +302,9 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
                   conversationMode: bot.conversationMode,
                   gender: bot.gender
               }, 
-              selectedAI
+              selectedAI,
+              () => updateGeminiUsage(selectedAI, false),
+              () => updateGeminiUsage(selectedAI, true)
           );
           
           const newHistory = [...chatHistory];
@@ -310,7 +315,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       } finally {
           setIsTyping(false);
       }
-  }, [chatHistory, bot, selectedAI, onUpdateHistory]);
+  }, [chatHistory, bot, selectedAI, onUpdateHistory, updateGeminiUsage]);
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();

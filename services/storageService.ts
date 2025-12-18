@@ -1,5 +1,5 @@
 
-import { BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock } from '../types';
+import { BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock, GeminiUsage } from '../types';
 
 // This service uses localForage to persist data via IndexedDB.
 declare const localforage: any;
@@ -16,6 +16,7 @@ interface UserData {
     savedImages: string[];
     sessions: ChatSession[];
     customBlocks: CustomBlock[];
+    geminiUsage: GeminiUsage;
 }
 
 const OLD_STORAGE_KEY = 'zia_userData';
@@ -33,6 +34,7 @@ const KEYS: { [K in keyof UserData]: string } = {
     savedImages: 'zia_savedImages',
     sessions: 'zia_sessions',
     customBlocks: 'zia_customBlocks',
+    geminiUsage: 'zia_geminiUsage',
 };
 
 

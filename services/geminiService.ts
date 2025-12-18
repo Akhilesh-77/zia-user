@@ -58,6 +58,14 @@ const mapErrorToMessage = (error: any): string => {
     return "(System: Something went wrong. Please resend your message.)";
 };
 
+/**
+ * Checks if an error is related to quota or rate limits.
+ */
+export const isQuotaError = (error: any): boolean => {
+    const msg = String(error?.message || error || "").toLowerCase();
+    return msg.includes("429") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("limit reached") || msg.includes("exhausted");
+};
+
 const fileToGenerativePart = (base64Data: string, mimeType: string): Part => {
   try {
       if (!base64Data) return { inlineData: { data: "", mimeType: "image/jpeg" } };
@@ -82,8 +90,8 @@ async function retry<T>(fn: () => Promise<T>): Promise<T> {
     } catch (error: any) {
       lastError = error;
       const msg = String(error?.message || "").toLowerCase();
-      // Don't retry on auth or user-missing errors
-      if (msg.includes("missing") || msg.includes("401") || msg.includes("invalid") || msg.includes("unauthorized")) throw error;
+      // Don't retry on auth, quota or user-missing errors
+      if (msg.includes("missing") || msg.includes("401") || msg.includes("invalid") || msg.includes("unauthorized") || isQuotaError(error)) throw error;
       if (i < RETRY_DELAYS.length - 1) {
           await new Promise(res => setTimeout(res, RETRY_DELAYS[i]));
       }
@@ -210,36 +218,55 @@ const callGeminiText = async (
 const generateText = async (
   systemPrompt: string,
   history: ChatMessage[],
-  selectedAI: AIModelOption
+  selectedAI: AIModelOption,
+  onSuccess?: () => void,
+  onQuotaExceeded?: (err: any) => void
 ): Promise<string> => {
   try {
     // 1. ROUTE TO LOCAL OFFLINE
     if (selectedAI === 'local-offline') {
-        return processLocalResponse(history, { name: "Zia", personality: systemPrompt, conversationMode: 'normal', gender: 'female' });
+        const res = processLocalResponse(history, { name: "Zia", personality: systemPrompt, conversationMode: 'normal', gender: 'female' });
+        onSuccess?.();
+        return res;
     }
 
     // 2. ROUTE TO DEEPSEEK
     if (selectedAI === 'deepseek-chat') {
-      return await retry(() => callDeepSeek(systemPrompt, history));
+      const res = await retry(() => callDeepSeek(systemPrompt, history));
+      onSuccess?.();
+      return res;
     }
 
     // 3. ROUTE TO OPENROUTER
     if (selectedAI in OPENROUTER_MODELS) {
-      return await retry(() => callOpenRouter(selectedAI, systemPrompt, history));
+      const res = await retry(() => callOpenRouter(selectedAI, systemPrompt, history));
+      onSuccess?.();
+      return res;
     }
 
     // 4. ROUTE TO GEMINI (With Failover)
     try {
-      return await retry(() => callGeminiText(systemPrompt, history, selectedAI));
+      const res = await retry(() => callGeminiText(systemPrompt, history, selectedAI));
+      onSuccess?.();
+      return res;
     } catch (gemErr) {
+      if (isQuotaError(gemErr)) {
+          onQuotaExceeded?.(gemErr);
+      }
+      
       // If Gemini fails, try DeepSeek as last resort if key exists
       if (DEEPSEEK_KEY && selectedAI.includes('gemini')) {
           console.warn("Gemini failed, falling back to DeepSeek...");
-          return await callDeepSeek(systemPrompt, history);
+          const res = await callDeepSeek(systemPrompt, history);
+          onSuccess?.();
+          return res;
       }
       throw gemErr;
     }
   } catch (err) {
+    if (isQuotaError(err)) {
+        onQuotaExceeded?.(err);
+    }
     return mapErrorToMessage(err);
   }
 };
@@ -247,13 +274,16 @@ const generateText = async (
 export const generateBotResponse = async (
   history: ChatMessage[],
   botProfile: Pick<BotProfile, "name" | "personality" | "isSpicy" | "conversationMode" | "gender">,
-  selectedAI: AIModelOption
+  selectedAI: AIModelOption,
+  onSuccess?: () => void,
+  onQuotaExceeded?: (err: any) => void
 ): Promise<string> => {
   if (!botProfile) return "(System: Bot profile missing.)";
   
   try {
     if (selectedAI === 'local-offline') {
         await new Promise(res => setTimeout(res, 400 + Math.random() * 400));
+        onSuccess?.();
         return processLocalResponse(history, botProfile);
     }
 
@@ -268,8 +298,11 @@ export const generateBotResponse = async (
       gender
     );
 
-    return await generateText(enhancedPrompt, history, selectedAI);
+    return await generateText(enhancedPrompt, history, selectedAI, onSuccess, onQuotaExceeded);
   } catch (error) {
+    if (isQuotaError(error)) {
+        onQuotaExceeded?.(error);
+    }
     return mapErrorToMessage(error);
   }
 };

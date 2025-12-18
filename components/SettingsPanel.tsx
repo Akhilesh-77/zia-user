@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import type { AIModelOption, VoicePreference, BotProfile, Persona, ChatMessage } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import type { AIModelOption, VoicePreference, GeminiUsage } from '../types';
 import type { Page } from '../App';
 
 
@@ -17,24 +17,49 @@ interface SettingsPanelProps {
   hasConsented: boolean;
   onConsentChange: (agreed: boolean) => void;
   onNavigate: (page: Page) => void;
+  geminiUsage: GeminiUsage;
 }
 
-// FIX: Corrected the display names for Gemini models from 1.5 to 2.5 to match the actual models.
-const aiModelOptions: { id: AIModelOption, name: string }[] = [
+// Model Display Config
+const aiModelOptions: { id: AIModelOption, name: string, quotaLimit?: number }[] = [
     { id: 'local-offline', name: '⚡ Local / Offline (Privacy Mode)' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)' },
-    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', quotaLimit: 15 },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', quotaLimit: 2 },
+    { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)', quotaLimit: 15 },
+    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite', quotaLimit: 15 },
     { id: 'deepseek-chat', name: 'DeepSeek Chat (Direct)' },
     { id: 'deepseek-r1-free', name: 'DeepSeek R1 Free (Chimera)' },
     { id: 'venice-dolphin-mistral-24b', name: 'Venice Dolphin Mistral 24B' },
     { id: 'mistralai-devstral-2512', name: 'Mistral Devstral 2512' },
 ];
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, toggleTheme, onClearData, selectedAI, onSelectAI, voicePreference, onSetVoicePreference, hasConsented, onConsentChange, onNavigate }) => {
+const GeminiUsageItem: React.FC<{ modelName: string; count: number; limit: number; isExceeded: boolean }> = ({ modelName, count, limit, isExceeded }) => {
+    const status = isExceeded ? 'Limit Reached' : (count > limit * 0.8 ? 'Near Limit' : 'Available');
+    const colorClass = isExceeded ? 'text-red-500' : (count > limit * 0.8 ? 'text-yellow-500' : 'text-green-500');
+
+    return (
+        <div className="flex flex-col gap-1 p-3 bg-white/5 rounded-lg border border-white/5">
+            <div className="flex justify-between items-center">
+                <span className="text-sm font-bold truncate pr-2">{modelName}</span>
+                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-black/30 ${colorClass}`}>{status}</span>
+            </div>
+            <div className="flex justify-between items-end">
+                <div className="flex-1 mr-4 h-1.5 bg-black/30 rounded-full overflow-hidden">
+                    <div 
+                        className={`h-full transition-all duration-500 ${isExceeded ? 'bg-red-500' : 'bg-accent'}`} 
+                        style={{ width: `${Math.min(100, (count / limit) * 100)}%` }} 
+                    />
+                </div>
+                <span className="text-[10px] text-gray-400 font-mono whitespace-nowrap">~{count}/{limit} msgs</span>
+            </div>
+        </div>
+    );
+}
+
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, toggleTheme, onClearData, selectedAI, onSelectAI, voicePreference, onSetVoicePreference, hasConsented, onConsentChange, onNavigate, geminiUsage }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isDisclaimerExpanded, setIsDisclaimerExpanded] = useState(false);
+  const [isUsageExpanded, setIsUsageExpanded] = useState(false);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -44,13 +69,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
         }
     };
     loadVoices();
-    // Voices might load asynchronously.
     window.speechSynthesis.onvoiceschanged = loadVoices;
     
     return () => {
         window.speechSynthesis.onvoiceschanged = null;
     };
   }, []);
+
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayUsage = useMemo(() => geminiUsage[todayStr] || {}, [geminiUsage, todayStr]);
 
   const handleNavigateStats = () => {
     onNavigate('stats');
@@ -69,10 +96,38 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
       <div 
         className={`fixed top-0 left-0 h-full w-80 max-w-[80vw] bg-light-bg dark:bg-dark-bg shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
-        <div className="p-6 flex flex-col h-full overflow-y-auto">
+        <div className="p-6 flex flex-col h-full overflow-y-auto no-scrollbar">
             <h2 className="text-2xl font-bold mb-8">Settings</h2>
             
             <div className="space-y-4">
+                {/* GEMINI USAGE DASHBOARD (Read-Only) */}
+                <div className="bg-white/5 dark:bg-black/10 rounded-xl overflow-hidden border border-accent/20">
+                    <button 
+                        onClick={() => setIsUsageExpanded(!isUsageExpanded)} 
+                        className="w-full flex justify-between items-center p-4 bg-accent/10 hover:bg-accent/20 transition-colors"
+                    >
+                        <span className="font-bold text-sm">Gemini Usage</span>
+                        <svg className={`h-4 w-4 transition-transform duration-300 ${isUsageExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    {isUsageExpanded && (
+                        <div className="p-4 space-y-3 animate-fadeIn">
+                            <p className="text-[10px] text-gray-500 mb-2 italic">Estimates reset daily at 00:00 UTC. Accuracy best-effort.</p>
+                            {aiModelOptions.filter(opt => opt.quotaLimit).map(model => {
+                                const stats = todayUsage[model.id] || { count: 0, limitReached: false };
+                                return (
+                                    <GeminiUsageItem 
+                                        key={model.id}
+                                        modelName={model.name.replace('Gemini ', '')}
+                                        count={stats.count}
+                                        limit={model.quotaLimit!}
+                                        isExceeded={stats.limitReached}
+                                    />
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
                 <div className="flex justify-between items-center bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <span className="font-medium">Theme</span>
                     <button onClick={toggleTheme} className="flex items-center gap-2">

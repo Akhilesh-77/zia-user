@@ -13,7 +13,7 @@ import FooterNav from './components/FooterNav';
 import SettingsPanel from './components/SettingsPanel';
 import PhotoGalleryPage from './components/PhotoGalleryPage';
 import VersionPage from './components/VersionPage';
-import type { User, BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock } from './types';
+import type { User, BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock, GeminiUsage } from './types';
 import { migrateData, loadUserData, saveUserData, clearUserData } from './services/storageService';
 
 export type Page = 'home' | 'humans' | 'create' | 'images' | 'personas' | 'chat' | 'story' | 'code' | 'stats' | 'photo' | 'version';
@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [botUsage, setBotUsage] = useState<Record<string, number>>({});
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [customBlocks, setCustomBlocks] = useState<CustomBlock[]>([]);
+  const [geminiUsage, setGeminiUsage] = useState<GeminiUsage>({});
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedAI, setSelectedAI] = useState<AIModelOption>('gemini-2.5-flash');
@@ -87,6 +88,7 @@ const App: React.FC = () => {
         setBotUsage(data?.botUsage || {});
         setSessions(data?.sessions || []);
         setCustomBlocks(data?.customBlocks || []);
+        setGeminiUsage(data?.geminiUsage || {});
         setTheme(data?.theme || 'dark');
         setSelectedAI(data?.selectedAI || 'gemini-2.5-flash');
         setVoicePreference(data?.voicePreference || null);
@@ -108,6 +110,7 @@ const App: React.FC = () => {
   useEffect(() => { if (isDataLoaded) saveUserData({ botUsage }); }, [botUsage, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ sessions }); }, [sessions, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ customBlocks }); }, [customBlocks, isDataLoaded]);
+  useEffect(() => { if (isDataLoaded) saveUserData({ geminiUsage }); }, [geminiUsage, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ theme }); }, [theme, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ selectedAI }); }, [selectedAI, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ voicePreference }); }, [voicePreference, isDataLoaded]);
@@ -323,6 +326,7 @@ const App: React.FC = () => {
         setBotUsage({});
         setSessions([]);
         setCustomBlocks([]);
+        setGeminiUsage({});
       }
   }, []);
   
@@ -333,6 +337,28 @@ const App: React.FC = () => {
   const logSession = useCallback((startTime: number, botId: string) => {
     const newSession: ChatSession = { startTime, endTime: Date.now(), botId };
     setSessions(prev => [...prev, newSession]);
+  }, []);
+
+  const updateGeminiUsage = useCallback((modelId: string, isQuotaExceeded: boolean) => {
+    const today = new Date().toISOString().split('T')[0];
+    setGeminiUsage(prev => {
+        const dateUsage = prev[today] || {};
+        const modelStats = dateUsage[modelId] || { count: 0, limitReached: false };
+        
+        const newStats = {
+            ...modelStats,
+            count: isQuotaExceeded ? modelStats.count : modelStats.count + 1,
+            limitReached: isQuotaExceeded || modelStats.limitReached
+        };
+
+        return {
+            ...prev,
+            [today]: {
+                ...dateUsage,
+                [modelId]: newStats
+            }
+        };
+    });
   }, []);
 
   const selectedBot = bots.find(b => b.id === selectedBotId);
@@ -371,7 +397,7 @@ const App: React.FC = () => {
         return <StatsDashboard bots={bots} personas={personas} chatHistories={chatHistories} sessions={sessions} onBack={() => window.location.hash = '#home'} />;
       case 'chat':
         if (effectiveBot) {
-          return <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(message) => handleNewMessage(effectiveBot.id, message)} onUpdateHistory={(newHistory) => handleUpdateHistory(effectiveBot.id, newHistory)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} onStartNewChat={handleStartNewChat} currentUser={defaultUser} logSession={logSession} />;
+          return <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(message) => handleNewMessage(effectiveBot.id, message)} onUpdateHistory={(newHistory) => handleUpdateHistory(effectiveBot.id, newHistory)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} onStartNewChat={handleStartNewChat} currentUser={defaultUser} logSession={logSession} updateGeminiUsage={updateGeminiUsage} />;
         }
         // FIX: Moved setTimeout out of JSX to prevent rendering Timer ID which causes 'ReactNode' type error.
         setTimeout(() => { window.location.hash = '#home'; }, 1000);
@@ -387,7 +413,7 @@ const App: React.FC = () => {
 
   return (
     <div className={`w-full h-full max-w-md mx-auto flex flex-col font-sans shadow-2xl overflow-hidden relative ${theme}`}>
-      <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={setSelectedAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} />
+      <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={setSelectedAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} geminiUsage={geminiUsage} />
       <div className="flex-1 overflow-hidden">{renderPage()}</div>
       {currentPage !== 'chat' && currentPage !== 'stats' && currentPage !== 'photo' && currentPage !== 'version' && (
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md">

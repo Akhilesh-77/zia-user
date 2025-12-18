@@ -11,10 +11,11 @@ import FooterNav from './components/FooterNav';
 import SettingsPanel from './components/SettingsPanel';
 import PhotoGalleryPage from './components/PhotoGalleryPage';
 import VersionPage from './components/VersionPage';
-import type { User, BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock, GeminiUsage } from './types';
+import ApiVaultPage from './components/ApiVaultPage';
+import type { User, BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock, GeminiUsage, ApiKeyEntry } from './types';
 import { migrateData, loadUserData, saveUserData, clearUserData } from './services/storageService';
 
-export type Page = 'home' | 'humans' | 'create' | 'personas' | 'chat' | 'story' | 'stats' | 'photo' | 'version';
+export type Page = 'home' | 'humans' | 'create' | 'personas' | 'chat' | 'story' | 'stats' | 'photo' | 'version' | 'vault';
 
 const defaultUser: User = {
   id: 'local-user',
@@ -50,6 +51,7 @@ const App: React.FC = () => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [customBlocks, setCustomBlocks] = useState<CustomBlock[]>([]);
   const [geminiUsage, setGeminiUsage] = useState<GeminiUsage>({});
+  const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   // FIX: Default to a modern Gemini 3 model.
@@ -75,6 +77,7 @@ const App: React.FC = () => {
         setSessions(data?.sessions || []);
         setCustomBlocks(data?.customBlocks || []);
         setGeminiUsage(data?.geminiUsage || {});
+        setApiKeys(data?.apiKeys || []);
         setTheme(data?.theme || 'dark');
         setSelectedAI(data?.selectedAI || 'gemini-3-flash-preview');
         setVoicePreference(data?.voicePreference || null);
@@ -95,6 +98,7 @@ const App: React.FC = () => {
   useEffect(() => { if (isDataLoaded) saveUserData({ sessions }); }, [sessions, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ customBlocks }); }, [customBlocks, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ geminiUsage }); }, [geminiUsage, isDataLoaded]);
+  useEffect(() => { if (isDataLoaded) saveUserData({ apiKeys }); }, [apiKeys, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ theme }); }, [theme, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ selectedAI }); }, [selectedAI, isDataLoaded]);
   useEffect(() => { if (isDataLoaded) saveUserData({ voicePreference }); }, [voicePreference, isDataLoaded]);
@@ -141,6 +145,7 @@ const App: React.FC = () => {
         case '#stats': setCurrentPage('stats'); break;
         case '#persona': setCurrentPage('personas'); break;
         case '#version': setCurrentPage('version'); break;
+        case '#vault': setCurrentPage('vault'); break;
         default: if (!hash) { window.location.hash = '#home'; } break;
       }
     };
@@ -160,7 +165,7 @@ const App: React.FC = () => {
         sessionStorage.removeItem('editingBotId');
         window.location.hash = '#create';
     } else {
-        const hash = { 'home': '#home', 'humans': '#humans', 'personas': '#persona', 'chat': '#chatview', 'story': '#story', 'stats': '#stats', 'photo': '#photo', 'version': '#version' }[page];
+        const hash = { 'home': '#home', 'humans': '#humans', 'personas': '#persona', 'chat': '#chatview', 'story': '#story', 'stats': '#stats', 'photo': '#photo', 'version': '#version', 'vault': '#vault' }[page];
         if (hash) window.location.hash = hash;
     }
   }, [hasConsented]);
@@ -225,6 +230,20 @@ const App: React.FC = () => {
       setBots(prev => prev.map(bot => botIds.includes(bot.id) ? { ...bot, personaId } : (bot.personaId === personaId ? { ...bot, personaId: null } : bot)));
   }, []);
 
+  const handleSaveApiKey = useCallback((key: ApiKeyEntry) => {
+      setApiKeys(prev => {
+          const exists = prev.find(k => k.id === key.id);
+          if (exists) return prev.map(k => k.id === key.id ? key : k);
+          return [...prev, key];
+      });
+  }, []);
+
+  const handleDeleteApiKey = useCallback((id: string) => {
+      if (window.confirm("Delete this API key?")) {
+          setApiKeys(prev => prev.filter(k => k.id !== id));
+      }
+  }, []);
+
   const handleNewMessage = useCallback((botId: string, message: ChatMessage) => {
     setChatHistories(prev => ({ ...prev, [botId]: [...(prev[botId] || []), message] }));
   }, []);
@@ -245,7 +264,7 @@ const App: React.FC = () => {
   const handleClearData = useCallback(async () => {
       if (window.confirm("Clear all data?")) {
         await clearUserData();
-        setBots([RASHMIKA_BOT]); setPersonas([]); setChatHistories({}); setBotUsage({}); setSessions([]); setCustomBlocks([]); setGeminiUsage({}); setBotReplyDelay(2);
+        setBots([RASHMIKA_BOT]); setPersonas([]); setChatHistories({}); setBotUsage({}); setSessions([]); setCustomBlocks([]); setGeminiUsage({}); setBotReplyDelay(2); setApiKeys([]);
       }
   }, []);
   
@@ -276,6 +295,7 @@ const App: React.FC = () => {
       case 'create': return <CreationForm onSaveBot={handleSaveBot} onNavigate={handleNavigate} botToEdit={botToEdit} />;
       case 'story': return <ScenarioGeneratorPage />;
       case 'personas': return <PersonasPage personas={personas} bots={bots} onSave={handleSavePersona} onDelete={handleDeletePersona} onAssign={handleAssignPersona} />;
+      case 'vault': return <ApiVaultPage apiKeys={apiKeys} onSaveKey={handleSaveApiKey} onDeleteKey={handleDeleteApiKey} />;
       case 'stats': return <StatsDashboard bots={bots} personas={personas} chatHistories={chatHistories} sessions={sessions} onBack={() => window.location.hash = '#home'} />;
       case 'chat': return effectiveBot ? <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(m) => handleNewMessage(effectiveBot.id, m)} onUpdateHistory={(h) => handleUpdateHistory(effectiveBot.id, h)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} onStartNewChat={handleStartNewChat} currentUser={defaultUser} logSession={logSession} updateGeminiUsage={updateGeminiUsage} botReplyDelay={botReplyDelay} /> : <div className="h-full w-full flex items-center justify-center">Loading...</div>;
       case 'photo': return selectedBot ? <PhotoGalleryPage bot={selectedBot} onBack={() => window.location.hash = '#chatview'} /> : null;

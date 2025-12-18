@@ -90,3 +90,11 @@ export interface GeminiUsage {
         [modelId: string]: ModelUsage;
     }
 }
+
+export interface ApiKeyEntry {
+  id: string;
+  name: string;
+  key: string;
+  isActive: boolean;
+  isExhausted: boolean;
+}

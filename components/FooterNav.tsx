@@ -19,14 +19,14 @@ const NavButton: React.FC<{
       aria-label={label}
     >
       {icon}
-      <span className="text-[10px] font-medium mt-1">{label}</span>
+      <span className="text-[10px] font-medium mt-1 whitespace-nowrap">{label}</span>
     </button>
 );
 
 const FooterNav: React.FC<FooterNavProps> = ({ currentPage, onNavigate }) => {
   return (
     <footer className="w-full max-w-md mx-auto h-20 bg-light-bg dark:bg-dark-bg border-t border-white/10 dark:border-black/20 backdrop-blur-sm bg-opacity-80 dark:bg-opacity-80 shadow-t-lg">
-      <nav className="flex items-center justify-around h-full px-2">
+      <nav className="flex items-center justify-around h-full px-1">
         <NavButton
           label="Home"
           icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>}
@@ -44,6 +44,12 @@ const FooterNav: React.FC<FooterNavProps> = ({ currentPage, onNavigate }) => {
           icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
           isActive={currentPage === 'create'}
           onClick={() => onNavigate('create')}
+        />
+        <NavButton
+          label="Vault"
+          icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>}
+          isActive={currentPage === 'vault'}
+          onClick={() => onNavigate('vault')}
         />
         <NavButton
           label="Prompts"

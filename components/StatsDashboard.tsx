@@ -1,3 +1,4 @@
+
 import React from 'react';
 import type { BotProfile, Persona, ChatMessage, ChatSession } from '../types';
 
@@ -45,8 +46,8 @@ const StatsDashboard: React.FC<StatsDashboardProps> = ({ bots, personas, chatHis
     const totalBots = bots.length;
     const totalPersonas = personas.length;
 
-    // FIX: Explicitly set the generic type for reduce and type the initial value as ChatMessage[] to prevent 'Type {}' inference errors.
-    const allMessages: ChatMessage[] = Object.values(chatHistories).reduce<ChatMessage[]>((acc, val) => acc.concat(val), [] as ChatMessage[]);
+    // FIX: Explicitly cast Object.values to ChatMessage[][] to resolve "unknown" inference in concat and prevent TS error 2769.
+    const allMessages: ChatMessage[] = (Object.values(chatHistories) as ChatMessage[][]).reduce<ChatMessage[]>((acc, val) => acc.concat(val), [] as ChatMessage[]);
     const userMessages = allMessages.filter(m => m.sender === 'user');
     const botMessages = allMessages.filter(m => m.sender === 'bot');
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { BotProfile } from '../types';
 
@@ -130,37 +131,22 @@ const GalleryItem: React.FC<{ src: string }> = ({ src }) => {
 }
 
 const PhotoGalleryPage: React.FC<PhotoGalleryPageProps> = ({ bot, onBack }) => {
-    // --- 1. Image List Preparation (Safe & Prioritizing Crops) ---
+    // --- 1. Image List Preparation (CRASH-SAFE & FILTERED) ---
+    // User requested ONLY creation gallery images. Excluded: Profile Photo, Chat Background.
+    // User requested Original-quality only.
     const images = React.useMemo(() => {
-        const list: string[] = [];
         try {
-            // Priority 1: Cropped Background
-            if (bot.chatBackground && typeof bot.chatBackground === 'string') {
-                list.push(bot.chatBackground);
-            } else if (bot.originalChatBackground && typeof bot.originalChatBackground === 'string') {
-                list.push(bot.originalChatBackground);
-            }
-
-            // Priority 2: Cropped Profile Photo
-            if (bot.photo && typeof bot.photo === 'string') {
-                list.push(bot.photo);
-            } else if (bot.originalPhoto && typeof bot.originalPhoto === 'string') {
-                list.push(bot.originalPhoto);
-            }
-
-            // Priority 3: Cropped Gallery Images
-            // CreationForm updates 'galleryImages' with crops. We use that list directly.
-            if (bot.galleryImages && Array.isArray(bot.galleryImages) && bot.galleryImages.length > 0) {
-                list.push(...bot.galleryImages);
-            } else if (bot.originalGalleryImages && Array.isArray(bot.originalGalleryImages) && bot.originalGalleryImages.length > 0) {
-                list.push(...bot.originalGalleryImages);
-            }
+            // Prioritize original raw uploads for quality, fallback to cropped versions if raw is missing.
+            const source = (bot.originalGalleryImages && Array.isArray(bot.originalGalleryImages) && bot.originalGalleryImages.length > 0)
+                ? bot.originalGalleryImages
+                : (bot.galleryImages || []);
+            
+            // Explicitly filter valid base64 strings or URLs
+            return source.filter(src => typeof src === 'string' && src.length > 10);
         } catch (e) {
             console.warn("Error processing gallery images", e);
+            return [];
         }
-        
-        // Remove duplicates and empty strings
-        return Array.from(new Set(list)).filter(src => typeof src === 'string' && src.length > 10);
     }, [bot]);
 
     // --- 2. State ---

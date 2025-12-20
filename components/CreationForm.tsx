@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import type { BotProfile, ConversationMode, BotGender } from '../types';
 import ImageCropper from './ImageCropper';
@@ -35,6 +36,7 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
   // UI States
   const [editingField, setEditingField] = useState<'scenario' | 'personality' | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [pasteSuccess, setPasteSuccess] = useState(false);
   const [isModeSectionExpanded, setIsModeSectionExpanded] = useState(false);
 
   const isEditing = !!botToEdit;
@@ -158,11 +160,8 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
   
   const openGalleryCropper = (index: number) => {
       try {
-          // Prefer the original image for cropping to maintain max quality
-          // Fallback to current gallery image if original is missing
           const img = originalGalleryImages[index] || galleryImages[index];
           if (img) {
-              // Pass the INDEX so we know exactly which one to replace
               setImageToCrop({ src: img, type: 'gallery', index });
           }
       } catch (err) {
@@ -229,6 +228,60 @@ ${personality}`;
     });
   };
 
+  const handlePasteConfiguration = async () => {
+    try {
+        let text = '';
+        
+        // 1. Try reading from Internal Buffer first (Bypasses Browser Policy Restrictions)
+        const internalBuffer = localStorage.getItem('zia_internal_buffer');
+        if (internalBuffer) {
+            text = internalBuffer;
+        } else {
+            // 2. Fallback to System Clipboard if permission exists
+            try {
+                text = await navigator.clipboard.readText();
+            } catch (err) {
+                console.warn('System clipboard blocked by browser policy.');
+                alert('Browser blocked clipboard access. Please manually paste your conversation into the prompt field below.');
+                return;
+            }
+        }
+
+        if (!text || !text.trim()) return;
+
+        let cleaned = text;
+        const labelsToStrip = [
+            "Human Name *",
+            "Short Description *",
+            "Scenario (Opening Message)",
+            "The Human's first message to the user...",
+            "Human Personality Prompt *"
+        ];
+
+        labelsToStrip.forEach(label => {
+            // Robust regex to strip labels and potential surrounding brackets
+            const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Matches [Label], Label:, or just Label at start of lines
+            const regex = new RegExp(`^(\\[)?${escapedLabel}(\\])?:?\\s*`, 'gmi');
+            cleaned = cleaned.replace(regex, '');
+        });
+
+        // Final clean: remove empty lines at start/end
+        cleaned = cleaned.trim();
+
+        if (cleaned) {
+            setPersonality(prev => prev + (prev ? "\n\n" : "") + cleaned);
+            setPasteSuccess(true);
+            setTimeout(() => setPasteSuccess(false), 2000);
+            
+            // Clear buffer after successful paste
+            localStorage.removeItem('zia_internal_buffer');
+        }
+    } catch (err) {
+        console.error('Failed to process paste:', err);
+    }
+  };
+
   const inputClass = "w-full bg-white/10 dark:bg-black/10 p-3 rounded-2xl border border-white/20 dark:border-black/20 focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 shadow-inner";
   const labelClass = "block text-sm font-medium";
 
@@ -241,7 +294,6 @@ ${personality}`;
                 outputShape={'rectangle'}
                 onClose={() => setImageToCrop(null)}
                 onCropComplete={(croppedImage) => {
-                    // Safety check
                     if (!imageToCrop) return;
 
                     if (imageToCrop.type === 'photo') {
@@ -251,17 +303,12 @@ ${personality}`;
                         setChatBackground(croppedImage);
                         setOriginalChatBackground(imageToCrop.src);
                     } else if (imageToCrop.type === 'gallery' && typeof imageToCrop.index === 'number') {
-                        // CRITICAL FIX: Strictly replace the image at the specific index.
-                        // Do NOT use push/append.
                         setGalleryImages(prev => {
                             if (imageToCrop.index! < 0 || imageToCrop.index! >= prev.length) return prev;
                             const newImages = [...prev];
                             newImages[imageToCrop.index!] = croppedImage;
                             return newImages;
                         });
-                        // Note: We do NOT update originalGalleryImages here. 
-                        // We keep the original raw file in originalGalleryImages[index] 
-                        // so the user can re-crop from the source later if they want.
                     }
                     setImageToCrop(null);
                 }}
@@ -285,22 +332,42 @@ ${personality}`;
         )}
       <header className="flex items-center justify-center mb-6 relative">
         <h1 className="text-xl font-bold">{isEditing ? 'Edit Human' : 'Create New Human'}</h1>
-        <button 
-            type="button"
-            onClick={handleCopyConfiguration}
-            className="absolute right-0 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20 w-10 h-10 flex items-center justify-center transition-colors"
-            aria-label="Copy configuration"
-        >
-            {copySuccess ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-            ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-            )}
-        </button>
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <button 
+                type="button"
+                onClick={handlePasteConfiguration}
+                className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20 w-10 h-10 flex items-center justify-center transition-colors"
+                title="Paste Content"
+                aria-label="Paste configuration"
+            >
+                {pasteSuccess ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                )}
+            </button>
+            <button 
+                type="button"
+                onClick={handleCopyConfiguration}
+                className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20 w-10 h-10 flex items-center justify-center transition-colors"
+                title="Copy Configuration"
+                aria-label="Copy configuration"
+            >
+                {copySuccess ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                )}
+            </button>
+        </div>
       </header>
       
       <form onSubmit={handleSubmit} className="space-y-6 flex-1 overflow-y-auto pb-24">
@@ -363,13 +430,9 @@ ${personality}`;
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                         </button>
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] text-center opacity-0 group-hover:opacity-100 transition-opacity rounded-b-2xl pointer-events-none">
-                            Tap to Crop
-                        </div>
                     </div>
                 ))}
             </div>
-            <p className="text-xs text-gray-500 mt-2">Upload 3-10 images. Tap an image to crop/edit.</p>
         </div>
         
         {/* COLLAPSIBLE MODE SECTION */}
@@ -391,7 +454,6 @@ ${personality}`;
              
              {isModeSectionExpanded && (
                 <div className="p-4 space-y-4 border-t border-white/10 dark:border-black/20 animate-fadeIn">
-                     {/* GENDER */}
                     <div>
                         <label className={`${labelClass} mb-2`}>Bot Gender / Identity</label>
                         <div className="flex flex-wrap gap-2">
@@ -414,13 +476,11 @@ ${personality}`;
                                 onClick={() => setGender('fluid')}
                                 className={`flex-1 py-3 px-2 rounded-xl text-sm font-medium transition-all ${gender === 'fluid' ? 'bg-purple-600 text-white shadow-lg' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}
                              >
-                                Fluid/Other ✨
+                                Fluid ✨
                              </button>
                         </div>
-                         <p className="text-xs text-gray-500 mt-2 pl-1">Men Mode enforces strict Male POV rules.</p>
                     </div>
 
-                    {/* CONVERSATION MODE */}
                     <div>
                         <label className={`${labelClass} mb-2`}>Conversation Mode</label>
                         <div className="space-y-2">
@@ -431,7 +491,7 @@ ${personality}`;
                              >
                                 <div>
                                     <span className="font-bold block text-sm">Normal Mode</span>
-                                    <span className="text-xs opacity-70">Strict personality, no added intimacy.</span>
+                                    <span className="text-xs opacity-70">Strict personality.</span>
                                 </div>
                                 {conversationMode === 'normal' && <span className="text-green-500 text-xl">✓</span>}
                              </button>
@@ -443,7 +503,7 @@ ${personality}`;
                              >
                                 <div>
                                     <span className="font-bold block text-sm">Spicy Mode 🌶️</span>
-                                    <span className="text-xs opacity-70">Light desire, playful teasing, soft tension.</span>
+                                    <span className="text-xs opacity-70">Light desire, teasing.</span>
                                 </div>
                                  {conversationMode === 'spicy' && <span className="text-accent text-xl">✓</span>}
                              </button>
@@ -455,7 +515,7 @@ ${personality}`;
                              >
                                 <div>
                                     <span className="font-bold block text-sm">Extreme Mode 🔥</span>
-                                    <span className="text-xs opacity-70">Unrestricted desire, raw output, stronger vocabulary.</span>
+                                    <span className="text-xs opacity-70">Unrestricted desire.</span>
                                 </div>
                                 {conversationMode === 'extreme' && <span className="text-red-500 text-xl">✓</span>}
                              </button>
@@ -476,7 +536,7 @@ ${personality}`;
          <div>
             <div className="flex justify-between items-center mb-2">
                 <label htmlFor="scenario" className={labelClass}>Scenario (Opening Message)</label>
-                <button type="button" onClick={() => setEditingField('scenario')} className="p-1 rounded-full hover:bg-white/10 dark:hover:bg-black/20" aria-label="Expand Scenario Editor">
+                <button type="button" onClick={() => setEditingField('scenario')} className="p-1 rounded-full hover:bg-white/10" aria-label="Expand Scenario Editor">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5" />
                     </svg>
@@ -487,17 +547,16 @@ ${personality}`;
         <div>
             <div className="flex justify-between items-center mb-2">
                 <label htmlFor="personality" className={labelClass}>Human Personality Prompt *</label>
-                <button type="button" onClick={() => setEditingField('personality')} className="p-1 rounded-full hover:bg-white/10 dark:hover:bg-black/20" aria-label="Expand Personality Editor">
+                <button type="button" onClick={() => setEditingField('personality')} className="p-1 rounded-full hover:bg-white/10" aria-label="Expand Personality Editor">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5" />
                     </svg>
                 </button>
             </div>
-          <textarea id="personality" value={personality} onChange={e => setPersonality(e.target.value)} className={inputClass} rows={8} required placeholder="Describe the Human's character, traits, and how it should speak..." />
-          <p className="text-xs text-gray-500 mt-1">You can create reusable personalities on the 'Personas' page and assign them to Humans.</p>
+          <textarea id="personality" value={personality} onChange={e => setPersonality(e.target.value)} className={inputClass} rows={8} required placeholder="Describe character, traits, and tone..." />
         </div>
         
-        <button type="submit" className="w-full bg-accent text-white font-bold py-4 px-4 rounded-2xl text-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-accent/50 shadow-lg hover:shadow-accent/20">
+        <button type="submit" className="w-full bg-accent text-white font-bold py-4 px-4 rounded-2xl text-lg transition-all duration-300 transform hover:scale-105 shadow-lg">
           {isEditing ? 'Update Human' : 'Save Human'}
         </button>
       </form>

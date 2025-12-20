@@ -152,6 +152,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempBrightness, setTempBrightness] = useState(bot.chatBackgroundBrightness ?? 100);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [copyConvoSuccess, setCopyConvoSuccess] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   
@@ -406,6 +407,24 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
     setIsMenuOpen(false);
   };
 
+  const handleCopyConversation = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const convoText = chatHistory.map(m => m.text).join('\n\n');
+    
+    // Internal app-buffer as a fallback for permission policy blocks
+    localStorage.setItem('zia_internal_buffer', convoText);
+
+    navigator.clipboard.writeText(convoText).then(() => {
+        setCopyConvoSuccess(true);
+        setTimeout(() => setCopyConvoSuccess(false), 2000);
+    }, (err) => {
+        console.warn('System clipboard blocked, using internal buffer instead.');
+        setCopyConvoSuccess(true);
+        setTimeout(() => setCopyConvoSuccess(false), 2000);
+    });
+    setIsMenuOpen(false);
+  };
+
   const handleOpenSettings = () => {
     setTempBrightness(bot.chatBackgroundBrightness ?? 100);
     setIsSettingsOpen(true);
@@ -464,6 +483,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
                     <a href="#" onClick={handleEditClick} className="block px-4 py-2 text-sm text-white hover:bg-accent rounded-t-lg">Edit Human</a>
                     <a href="#" onClick={handlePersonaClick} className="block px-4 py-2 text-sm text-white hover:bg-accent">Persona</a>
                     <a href="#" onClick={handleOpenSettings} className="block px-4 py-2 text-sm text-white hover:bg-accent">Chat Settings</a>
+                    <a href="#" onClick={handleCopyConversation} className="block px-4 py-2 text-sm text-white hover:bg-accent">{copyConvoSuccess ? 'Copied!' : 'Copy Conversation'}</a>
                     <a href="#" onClick={handleCopyPrompt} className="block px-4 py-2 text-sm text-white hover:bg-accent">{copySuccess ? 'Copied!' : 'Copy Prompt'}</a>
                     <a href="#" onClick={handleNewChatClick} className="block px-4 py-2 text-sm text-white hover:bg-accent rounded-b-lg">Start New Chat</a>
                 </div>

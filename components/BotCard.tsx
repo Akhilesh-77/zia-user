@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import type { BotProfile } from '../types';
 import { generateDynamicDescription } from '../services/geminiService';
@@ -101,11 +102,19 @@ const SwipeToChatButton: React.FC<{ botName: string; onSwiped: () => void; }> = 
 
 const BotPreviewModal: React.FC<{ bot: BotProfile, onSwiped: () => void, onClose: () => void }> = ({ bot, onSwiped, onClose }) => {
     const [isClosing, setIsClosing] = useState(false);
+    const [showConfig, setShowConfig] = useState(false);
 
     const handleClose = () => {
         setIsClosing(true);
         setTimeout(onClose, 300); // Duration of the animation
     };
+
+    const structuredConfig = `Human Name: ${bot.name}
+Short Description: ${bot.description}
+Scenario (Opening Message): ${bot.scenario}
+
+Human Personality Prompt:
+${bot.personality}`;
 
     return (
         <div 
@@ -116,8 +125,37 @@ const BotPreviewModal: React.FC<{ bot: BotProfile, onSwiped: () => void, onClose
                 className={`w-full max-w-md relative transition-transform duration-300 ${isClosing ? 'scale-95' : 'scale-100'}`}
                 onClick={e => e.stopPropagation()}
             >
-                <img src={bot.photo} alt={bot.name} className="w-full h-auto max-h-[50vh] object-contain rounded-2xl shadow-2xl" />
-                <SwipeToChatButton botName={bot.name} onSwiped={onSwiped} />
+                {!showConfig ? (
+                    <img src={bot.photo} alt={bot.name} className="w-full h-auto max-h-[50vh] object-contain rounded-2xl shadow-2xl" />
+                ) : (
+                    <div className="w-full h-[50vh] bg-dark-bg p-6 rounded-2xl shadow-2xl border border-white/10 flex flex-col animate-fadeIn">
+                        <h3 className="text-xl font-bold mb-4">Bot Configuration</h3>
+                        <textarea 
+                            readOnly 
+                            value={structuredConfig} 
+                            className="flex-1 bg-black/20 p-4 rounded-xl border border-white/10 text-sm font-mono text-gray-300 resize-none no-scrollbar outline-none focus:ring-1 focus:ring-accent"
+                        />
+                        <button 
+                            onClick={() => {
+                                navigator.clipboard.writeText(structuredConfig);
+                                alert("Configuration copied to clipboard.");
+                            }}
+                            className="mt-4 bg-accent/20 text-accent font-bold py-2 rounded-xl border border-accent/30 hover:bg-accent/30 transition-colors"
+                        >
+                            Copy to Clipboard
+                        </button>
+                    </div>
+                )}
+
+                <div className="mt-4 flex flex-col gap-2">
+                    <button 
+                        onClick={() => setShowConfig(!showConfig)}
+                        className="text-xs uppercase tracking-widest text-gray-400 font-bold hover:text-white transition-colors py-2"
+                    >
+                        {showConfig ? '← Show Profile' : 'View AI Studio Config →'}
+                    </button>
+                    <SwipeToChatButton botName={bot.name} onSwiped={onSwiped} />
+                </div>
             </div>
              <button onClick={handleClose} className="absolute top-5 right-5 bg-black/50 text-white rounded-full h-10 w-10 flex items-center justify-center font-bold text-2xl shadow-lg backdrop-blur-sm">&times;</button>
         </div>

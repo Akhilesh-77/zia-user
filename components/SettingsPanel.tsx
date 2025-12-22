@@ -23,19 +23,16 @@ interface SettingsPanelProps {
 }
 
 // Model Display Config
-// FIX: Added gemini-3 series to the UI options.
-const aiModelOptions: { id: AIModelOption, name: string, quotaLimit?: number }[] = [
-    { id: 'local-offline', name: '⚡ Local / Offline (Privacy Mode)' },
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Next Gen)', quotaLimit: 20 },
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Complex Tasks)', quotaLimit: 5 },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', quotaLimit: 15 },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', quotaLimit: 2 },
-    { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)', quotaLimit: 15 },
-    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite', quotaLimit: 15 },
-    { id: 'deepseek-chat', name: 'DeepSeek Chat (Direct)' },
-    { id: 'deepseek-r1-free', name: 'DeepSeek R1 Free (Chimera)' },
-    { id: 'venice-dolphin-mistral-24b', name: 'Venice Dolphin Mistral 24B' },
-    { id: 'mistralai-devstral-2512', name: 'Mistral Devstral 2512' },
+const aiModelOptions: { id: AIModelOption, name: string, quotaLimit?: number, provider: string }[] = [
+    { id: 'local-offline', name: '⚡ Local / Offline (Privacy Mode)', provider: 'Local' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Fastest)', quotaLimit: 20, provider: 'Google' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Smartest)', quotaLimit: 5, provider: 'Google' },
+    { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)', provider: 'DeepSeek' },
+    { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)', provider: 'DeepSeek' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', quotaLimit: 15, provider: 'Google' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', quotaLimit: 2, provider: 'Google' },
+    { id: 'gemini-flash-latest', name: 'Gemini Flash (Legacy)', quotaLimit: 15, provider: 'Google' },
+    { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite', quotaLimit: 15, provider: 'Google' },
 ];
 
 const GeminiUsageItem: React.FC<{ modelName: string; count: number; limit: number; isExceeded: boolean }> = ({ modelName, count, limit, isExceeded }) => {
@@ -92,6 +89,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
     onNavigate('version');
   }
 
+  const groupedOptions = useMemo(() => {
+      const groups: Record<string, typeof aiModelOptions> = {};
+      aiModelOptions.forEach(opt => {
+          if (!groups[opt.provider]) groups[opt.provider] = [];
+          groups[opt.provider].push(opt);
+      });
+      return groups;
+  }, []);
+
   return (
     <>
       <div 
@@ -111,12 +117,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                         onClick={() => setIsUsageExpanded(!isUsageExpanded)} 
                         className="w-full flex justify-between items-center p-4 bg-accent/10 hover:bg-accent/20 transition-colors"
                     >
-                        <span className="font-bold text-sm">Gemini Usage</span>
+                        <span className="font-bold text-sm">Google Quota (Free)</span>
                         <svg className={`h-4 w-4 transition-transform duration-300 ${isUsageExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                     </button>
                     {isUsageExpanded && (
                         <div className="p-4 space-y-3 animate-fadeIn">
-                            <p className="text-[10px] text-gray-500 mb-2 italic">Estimates reset daily at 00:00 UTC. Accuracy best-effort.</p>
+                            <p className="text-[10px] text-gray-500 mb-2 italic">Estimates reset daily. Note: DeepSeek quota is managed on their platform.</p>
                             {aiModelOptions.filter(opt => opt.quotaLimit).map(model => {
                                 const stats = todayUsage[model.id] || { count: 0, limitReached: false };
                                 return (
@@ -133,13 +139,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                     )}
                 </div>
 
-                {/* BOT REPLY DELAY SLIDER */}
                 <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <div className="flex justify-between items-center mb-2">
                         <span className="font-medium">Bot Reply Delay</span>
                         <span className="text-accent font-bold">{botReplyDelay}s</span>
                     </div>
-                    <p className="text-[10px] text-gray-400 mb-3">Artificial thinking time for realistic replies.</p>
                     <input 
                         type="range"
                         min="0"
@@ -149,27 +153,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                         onChange={(e) => onSetBotReplyDelay(parseInt(e.target.value, 10))}
                         className="w-full h-1.5 bg-black/30 rounded-lg appearance-none cursor-pointer accent-accent"
                     />
-                    <div className="flex justify-between text-[10px] text-gray-500 mt-1">
-                        <span>Instant</span>
-                        <span>1 min</span>
-                    </div>
                 </div>
 
                 <div className="flex justify-between items-center bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <span className="font-medium">Theme</span>
                     <button onClick={toggleTheme} className="flex items-center gap-2">
                         <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
-                        {theme === 'dark' ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                        )}
                     </button>
                 </div>
                 
                  <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <p className="font-medium mb-2">Voice Preference</p>
-                    <p className="text-xs text-gray-400 mb-3">Select the default voice for text-to-speech.</p>
                     {voices.length > 0 ? (
                         <select
                             value={voicePreference || ''}
@@ -178,9 +172,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                         >
                             <option value="">Browser Default</option>
                             {voices.map(voice => (
-                                <option key={voice.name} value={voice.name}>
-                                    {voice.name} ({voice.lang})
-                                </option>
+                                <option key={voice.name} value={voice.name}>{voice.name}</option>
                             ))}
                         </select>
                     ) : (
@@ -189,105 +181,54 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                 </div>
 
                 <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
-                    <p className="font-medium mb-2">AI Model</p>
-                    <p className="text-xs text-gray-400 mb-3">Select the AI model to use for generating chat responses.</p>
-                    <div className="space-y-2">
-                        {aiModelOptions.map(option => (
-                             <label key={option.id} className="flex items-center cursor-pointer">
-                                <input 
-                                    type="radio" 
-                                    name="ai-model" 
-                                    value={option.id}
-                                    checked={selectedAI === option.id}
-                                    onChange={() => onSelectAI(option.id as AIModelOption)}
-                                    className="h-4 w-4 text-accent bg-gray-700 border-gray-600 focus:ring-accent"
-                                />
-                                <span className="ml-3 text-sm">{option.name}</span>
-                            </label>
+                    <p className="font-medium mb-2">AI Provider & Model</p>
+                    <div className="space-y-4">
+                        {Object.entries(groupedOptions).map(([provider, options]) => (
+                            <div key={provider} className="space-y-1">
+                                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">{provider}</p>
+                                {options.map(option => (
+                                    <label key={option.id} className="flex items-center cursor-pointer p-1 hover:bg-white/5 rounded-lg transition-colors">
+                                        <input 
+                                            type="radio" 
+                                            name="ai-model" 
+                                            value={option.id}
+                                            checked={selectedAI === option.id}
+                                            onChange={() => onSelectAI(option.id as AIModelOption)}
+                                            className="h-4 w-4 text-accent bg-gray-700 border-gray-600 focus:ring-accent"
+                                        />
+                                        <span className={`ml-3 text-sm ${selectedAI === option.id ? 'text-accent font-bold' : 'text-gray-300'}`}>
+                                            {option.name}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
                         ))}
                     </div>
                 </div>
 
                 <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl space-y-3">
                     <p className="font-medium">App Tools</p>
-                    <button 
-                        onClick={handleNavigateStats}
-                        className="w-full bg-accent/80 text-white font-bold py-2 px-4 rounded-lg transition-colors hover:bg-accent"
-                    >
-                        Usage Stats
-                    </button>
-                    <button 
-                        onClick={handleNavigateVersion}
-                        className="w-full bg-gray-600/80 text-white font-bold py-2 px-4 rounded-lg transition-colors hover:bg-gray-500"
-                    >
-                        Version Info
-                    </button>
-                </div>
-
-                <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl space-y-3">
-                    <p className="font-medium">Data Management</p>
-                    <button 
-                        onClick={onClearData} 
-                        className="w-full bg-red-600/80 text-white font-bold py-2 px-4 rounded-lg transition-colors hover:bg-red-500"
-                    >
-                        Clear All App Data
-                    </button>
+                    <button onClick={handleNavigateStats} className="w-full bg-accent/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Usage Stats</button>
+                    <button onClick={handleNavigateVersion} className="w-full bg-gray-600/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Version Info</button>
+                    <button onClick={onClearData} className="w-full bg-red-600/80 text-white font-bold py-2 px-4 rounded-lg transition-colors">Clear All Data</button>
                 </div>
 
                 <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
-                    {!isDisclaimerExpanded && (
-                        <div 
-                            onClick={() => setIsDisclaimerExpanded(true)} 
-                            className="cursor-pointer text-sm font-medium"
-                        >
-                            Disclaimer: Tap to view more ▼
-                        </div>
-                    )}
-
-                    {isDisclaimerExpanded && (
-                        <div className="animate-fadeIn">
-                            <p className="text-sm font-bold not-italic">Disclaimer (Official Note)</p>
-                            <div className="text-xs italic text-gray-400 space-y-2 mt-1">
-                                <p>These chatbots and characters are completely fictional.</p>
-                                <p>Even if they seem connected to real-life people, they’re made only for entertainment.</p>
-                                <p>Please don’t try to replicate them or their behavior in real life.</p>
-                                <p>Our Zia is soft and kind — but real humans aren’t always the same. 💫</p>
-                                <p className="not-italic">— ziaakia.ai team</p>
-                            </div>
-                            <div 
-                                onClick={() => setIsDisclaimerExpanded(false)} 
-                                className="cursor-pointer text-sm font-medium text-gray-300 mt-2"
-                            >
-                                ▲ Show less
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="pt-4 mt-4 border-t border-white/10">
-                        <label className="flex items-start cursor-pointer">
-                            <input 
-                                type="checkbox" 
-                                checked={hasConsented}
-                                onChange={(e) => onConsentChange(e.target.checked)}
-                                className="h-5 w-5 mt-0.5 text-accent bg-gray-700 border-gray-600 focus:ring-accent rounded flex-shrink-0"
-                                aria-labelledby="consent-label"
-                            />
-                            <span id="consent-label" className="ml-3 text-sm">
-                                I agree to the disclaimer and understand Zia.ai is for entertainment only.
-                            </span>
-                        </label>
-                        {!hasConsented && (
-                            <p className="text-red-500 text-xs mt-2 ml-8 animate-fadeIn">
-                                Please agree to the disclaimer to continue.
-                            </p>
-                        )}
-                    </div>
+                    <label className="flex items-start cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            checked={hasConsented}
+                            onChange={(e) => onConsentChange(e.target.checked)}
+                            className="h-5 w-5 mt-0.5 text-accent bg-gray-700 border-gray-600 focus:ring-accent rounded flex-shrink-0"
+                        />
+                        <span className="ml-3 text-sm">I agree to the disclaimer.</span>
+                    </label>
                 </div>
             </div>
 
             <div className="mt-auto text-center text-xs text-gray-500 flex flex-col items-center gap-2 pt-4">
                 <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
-                <p>© 2025 Zia.ai — Powered by Gemini AI</p>
+                <p>© 2025 Zia.ai — Gemini & DeepSeek Integration</p>
             </div>
         </div>
       </div>

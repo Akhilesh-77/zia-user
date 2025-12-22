@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { BotProfile } from '../types';
 import { generateDynamicDescription } from '../services/geminiService';
 
@@ -10,7 +11,7 @@ interface BotCardProps {
     onClone?: () => void;
 }
 
-const SwipeToChatButton: React.FC<{ botName: string; onSwiped: () => void; }> = ({ botName, onSwiped }) => {
+const SwipeToChatButton: React.FC<{ botName: string, onSwiped: () => void }> = ({ botName, onSwiped }) => {
     const trackRef = useRef<HTMLDivElement>(null);
     const thumbRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -52,12 +53,13 @@ const SwipeToChatButton: React.FC<{ botName: string; onSwiped: () => void; }> = 
         setThumbX(0);
     };
     
-    // Cross-browser Pointer Events (Fix for Edge/AI Studio)
     const onPointerDown = (e: React.PointerEvent) => {
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         handleDragStart(e.clientX);
     };
-    const onPointerMove = (e: React.PointerEvent) => { if(isDragging) handleDragMove(e.clientX) };
+    const onPointerMove = (e: React.PointerEvent) => { 
+        if(isDragging) handleDragMove(e.clientX); 
+    };
     const onPointerUp = (e: React.PointerEvent) => {
         if(isDragging) {
             (e.target as HTMLElement).releasePointerCapture(e.pointerId);
@@ -110,7 +112,7 @@ const BotPreviewModal: React.FC<{ bot: BotProfile, onSwiped: () => void, onClose
              <button onClick={handleClose} className="absolute top-5 right-5 bg-black/50 text-white rounded-full h-10 w-10 flex items-center justify-center font-bold text-2xl shadow-lg backdrop-blur-sm">&times;</button>
         </div>
     );
-}
+};
 
 const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClone }) => {
     const [menuOpen, setMenuOpen] = useState(false);
@@ -118,20 +120,24 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
     const [dynamicDesc, setDynamicDesc] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
 
-    const fetchDescription = async () => {
+    const fetchDescription = useCallback(async () => {
         if (!bot.personality.trim()) {
             setDynamicDesc(bot.description);
             return;
         }
-        const desc = await generateDynamicDescription(bot.personality);
-        setDynamicDesc(desc);
-    };
+        try {
+            const desc = await generateDynamicDescription(bot.personality);
+            setDynamicDesc(desc);
+        } catch (error) {
+            setDynamicDesc(bot.description);
+        }
+    }, [bot.personality, bot.description]);
 
     useEffect(() => {
         fetchDescription();
         const interval = setInterval(fetchDescription, 15000);
         return () => clearInterval(interval);
-    }, [bot.id, bot.personality]);
+    }, [fetchDescription]);
 
 
     useEffect(() => {
@@ -154,8 +160,6 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
     const handleDeleteClick = (e: React.PointerEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        // FORCE EXECUTION: Call the functional logic immediately on down-stroke
-        // to ensure it is registered before the component can unmount or the container blocks it.
         if (onDelete) onDelete();
         setMenuOpen(false);
     };

@@ -1,6 +1,4 @@
 
-// FIX: Removed self-import of 'BotProfile' which was causing a conflict with its local declaration.
-
 export type AIModelOption = 
   | 'gemini-3-flash-preview'
   | 'gemini-3-pro-preview'
@@ -38,21 +36,21 @@ export interface BotProfile {
   description: string;
   personality: string;
   photo: string; // base64 data URL
-  originalPhoto?: string | null; // base64 data URL (uncropped original)
-  gif?: string | null; // base64 data URL
+  originalPhoto?: string | null; 
+  gif?: string | null; 
   scenario: string;
-  chatBackground?: string | null; // base64 data URL
-  originalChatBackground?: string | null; // base64 data URL (uncropped original)
-  chatBackgroundBrightness?: number; // Brightness percentage (e.g., 100)
+  chatBackground?: string | null; 
+  originalChatBackground?: string | null; 
+  chatBackgroundBrightness?: number; 
   personaId?: string | null;
-  isSpicy?: boolean; // Kept for backward compatibility
-  conversationMode?: ConversationMode; // New field
-  gender?: BotGender; // New field
-  galleryImages?: string[]; // List of additional images (base64)
-  originalGalleryImages?: string[]; // List of original uncropped additional images (base64)
-  galleryVideos?: string[]; // List of additional videos (base64 data URL)
-  originalGalleryVideos?: string[]; // Original video sources
-  restoredHistory?: ChatMessage[]; // Virtual field for session restoration
+  isSpicy?: boolean; 
+  conversationMode?: ConversationMode; 
+  gender?: BotGender; 
+  galleryImages?: string[]; 
+  originalGalleryImages?: string[]; 
+  galleryVideos?: string[]; 
+  originalGalleryVideos?: string[]; 
+  restoredHistory?: ChatMessage[]; 
 }
 
 export interface ChatMessage {
@@ -67,7 +65,7 @@ export interface Persona {
   name: string;
   description?: string;
   personality: string;
-  photo?: string | null; // base64 data URL
+  photo?: string | null; 
 }
 
 export interface ChatSession {

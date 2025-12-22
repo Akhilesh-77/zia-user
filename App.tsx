@@ -262,6 +262,20 @@ const App: React.FC = () => {
   }, []);
 
   const handleSaveApiKey = useCallback((key: ApiKeyEntry) => {
+      // RESET QUOTA STATE when key is manually saved/changed
+      const today = new Date().toISOString().split('T')[0];
+      setGeminiUsage(prev => {
+          const newUsage = { ...prev };
+          if (newUsage[today]) {
+              const resetDay: any = {};
+              Object.keys(newUsage[today]).forEach(mId => {
+                  resetDay[mId] = { ...newUsage[today][mId], limitReached: false };
+              });
+              newUsage[today] = resetDay;
+          }
+          return newUsage;
+      });
+      
       setApiKeys(prev => {
           const exists = prev.find(k => k.id === key.id);
           if (exists) return prev.map(k => k.id === key.id ? key : k);
@@ -301,8 +315,33 @@ const App: React.FC = () => {
     setGeminiUsage(prev => {
         const d = prev[today] || {};
         const s = d[modelId] || { count: 0, limitReached: false };
-        return { ...prev, [today]: { ...d, [modelId]: { count: isQuotaExceeded ? s.count : s.count + 1, limitReached: isQuotaExceeded || s.limitReached } } };
+        return { 
+            ...prev, 
+            [today]: { 
+                ...d, 
+                [modelId]: { 
+                    count: isQuotaExceeded ? s.count : s.count + 1, 
+                    limitReached: isQuotaExceeded // Force sync with immediate API response
+                } 
+            } 
+        };
     });
+  }, []);
+
+  const handleSelectAI = useCallback((model: AIModelOption) => {
+      // RESET limitReached flag when switching models to allow immediate retry with fresh logic/key context
+      const today = new Date().toISOString().split('T')[0];
+      setGeminiUsage(prev => {
+          const newUsage = { ...prev };
+          if (newUsage[today] && newUsage[today][model]) {
+              newUsage[today] = {
+                  ...newUsage[today],
+                  [model]: { ...newUsage[today][model], limitReached: false }
+              };
+          }
+          return newUsage;
+      });
+      setSelectedAI(model);
   }, []);
 
   const selectedBot = bots.find(b => b.id === selectedBotId);
@@ -328,7 +367,7 @@ const App: React.FC = () => {
 
   return (
     <div className={`w-full h-full max-w-md mx-auto flex flex-col font-sans shadow-2xl overflow-hidden relative ${theme}`}>
-      <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={setSelectedAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} geminiUsage={geminiUsage} botReplyDelay={botReplyDelay} onSetBotReplyDelay={setBotReplyDelay} />
+      <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={handleSelectAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} geminiUsage={geminiUsage} botReplyDelay={botReplyDelay} onSetBotReplyDelay={setBotReplyDelay} />
       <div className="flex-1 overflow-hidden">{renderPage()}</div>
       {currentPage !== 'chat' && currentPage !== 'stats' && currentPage !== 'photo' && currentPage !== 'version' && (
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md"><FooterNav currentPage={currentPage} onNavigate={handleNavigate} /></div>

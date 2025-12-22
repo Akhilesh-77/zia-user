@@ -50,6 +50,9 @@ export interface BotProfile {
   gender?: BotGender; // New field
   galleryImages?: string[]; // List of additional images (base64)
   originalGalleryImages?: string[]; // List of original uncropped additional images (base64)
+  galleryVideos?: string[]; // List of additional videos (base64 data URL)
+  originalGalleryVideos?: string[]; // Original video sources
+  restoredHistory?: ChatMessage[]; // Virtual field for session restoration
 }
 
 export interface ChatMessage {

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { User, BotProfile, ChatMessage, Persona, AIModelOption, VoicePreference } from '../types';
-import { generateBotResponse } from '../services/geminiService';
+import { generateBotResponse, generateUserSuggestion } from '../services/geminiService';
 
 const PhotoViewer: React.FC<{ src: string; onClose: () => void }> = ({ src, onClose }) => (
     <div
@@ -134,14 +134,13 @@ interface ChatViewProps {
   selectedAI: AIModelOption;
   voicePreference: VoicePreference | null;
   onEdit: (id: string) => void;
-  onStartNewChat: (id: string) => void;
   currentUser: User;
   logSession: (startTime: number, botId: string) => void;
   updateGeminiUsage: (modelId: string, isQuotaExceeded: boolean) => void;
   botReplyDelay: number;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, onStartNewChat, currentUser, logSession, updateGeminiUsage, botReplyDelay }) => {
+const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMessage, onUpdateHistory, onUpdateBot, selectedAI, voicePreference, onEdit, currentUser, logSession, updateGeminiUsage, botReplyDelay }) => {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [thinkingText, setThinkingText] = useState('');
@@ -149,14 +148,17 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [photoToView, setPhotoToView] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMediaMenuOpen, setIsMediaMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempBrightness, setTempBrightness] = useState(bot.chatBackgroundBrightness ?? 100);
   const [copySuccess, setCopySuccess] = useState(false);
   const [copyConvoSuccess, setCopyConvoSuccess] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
   
   const menuRef = useRef<HTMLDivElement>(null);
+  const mediaMenuRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -164,29 +166,20 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
     return () => { isMounted.current = false; };
   }, []);
 
-  // --- CRASH-SAFE THINKING CYCLE (Refined for human-like realism) ---
+  // --- CRASH-SAFE THINKING CYCLE ---
   useEffect(() => {
       let interval: any;
       if (isTyping) {
-          const humanReflections = [
-              "Quietly sensing", "Thinking", "❤️❤️","😍", "🙌😒","Warm reflection", "Looking inward", "Searching for words", 
-              "A soft pause", "Gently wondering", "Feeling the moment", "Sensing the vibe", 
-              "Drifting in thought", "A quiet breath", "Noticing a feeling", "Brief hesitation", 
-              "Inner silence", "Patiently listening", "Softly aware", "Loving"
-          ];
-          
+          const humanReflections = ["Quietly sensing", "Thinking", "Warm reflection", "Looking inward", "Searching for words", "Feeling the vibe", "Drifting in thought", "A quiet breath", "Noticing a feeling", "Brief hesitation", "Inner silence", "Patiently listening", "Softly aware"];
           let lastIdx = -1;
           const pick = () => {
               let newIdx;
-              do {
-                  newIdx = Math.floor(Math.random() * humanReflections.length);
-              } while (newIdx === lastIdx && humanReflections.length > 1);
+              do { newIdx = Math.floor(Math.random() * humanReflections.length); } while (newIdx === lastIdx);
               lastIdx = newIdx;
               setThinkingText(humanReflections[newIdx]);
           };
-          
           pick();
-          interval = setInterval(pick, 2200); // Slightly slower for more human pace
+          interval = setInterval(pick, 2200);
       } else {
           setThinkingText('');
       }
@@ -197,15 +190,9 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   const userAvatar = bot.persona?.photo || currentUser.photoUrl; 
   const userAvatarAlt = bot.persona?.name || currentUser.name || 'User';
 
-  const hasGalleryImages = useMemo(() => {
-     return !!(bot.galleryImages?.length || bot.originalGalleryImages?.length);
-  }, [bot]);
-
   useEffect(() => {
     const startTime = Date.now();
-    return () => {
-      logSession(startTime, bot.id);
-    };
+    return () => { logSession(startTime, bot.id); };
   }, [bot.id, logSession]);
 
   useEffect(() => {
@@ -215,16 +202,11 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
   useEffect(() => {
     const loadVoices = () => {
         const availableVoices = window.speechSynthesis.getVoices();
-        if(availableVoices.length > 0) {
-            setVoices(availableVoices);
-        }
+        if(availableVoices.length > 0) setVoices(availableVoices);
     };
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
-    
-    return () => {
-        window.speechSynthesis.onvoiceschanged = null;
-    };
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
   }, []);
 
   useEffect(() => {
@@ -232,11 +214,12 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
         if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
             setIsMenuOpen(false);
         }
+        if (mediaMenuRef.current && !mediaMenuRef.current.contains(event.target as Node)) {
+            setIsMediaMenuOpen(false);
+        }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
 
@@ -285,11 +268,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       );
 
       if (isMounted.current && botReplyDelay > 0) {
-          try {
-              await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
-          } catch (e) {
-              console.warn("Delay timer failed, proceeding instantly", e);
-          }
+          await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
       }
 
       if (isMounted.current) {
@@ -301,7 +280,6 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
         };
         onNewMessage(finalBotMessage);
       }
-
     } catch (error) {
       console.error("ChatView send error:", error);
       if (isMounted.current) {
@@ -313,9 +291,71 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
         });
       }
     } finally {
-      if (isMounted.current) {
-        setIsTyping(false);
+      if (isMounted.current) setIsTyping(false);
+    }
+  };
+
+  const handleContinue = useCallback(async () => {
+    if (isTyping) return;
+    setIsTyping(true);
+
+    try {
+      const botResponseText = await generateBotResponse(
+          chatHistory, 
+          { 
+              name: bot.name,
+              personality: bot.personality, 
+              isSpicy: bot.isSpicy,
+              conversationMode: bot.conversationMode,
+              gender: bot.gender
+          }, 
+          selectedAI,
+          () => updateGeminiUsage(selectedAI, false),
+          () => updateGeminiUsage(selectedAI, true)
+      );
+
+      if (isMounted.current && botReplyDelay > 0) {
+          await new Promise(resolve => setTimeout(resolve, botReplyDelay * 1000));
       }
+
+      if (isMounted.current) {
+        const finalBotMessage: ChatMessage = {
+          id: `bot-cont-${Date.now()}`,
+          text: botResponseText,
+          sender: 'bot',
+          timestamp: Date.now(),
+        };
+        onNewMessage(finalBotMessage);
+      }
+    } catch (error) {
+      console.error("ChatView continue error:", error);
+      if (isMounted.current) {
+        onNewMessage({
+            id: `error-${Date.now()}`,
+            text: "(System: Failed to continue conversation. Try again.)",
+            sender: 'bot',
+            timestamp: Date.now()
+        });
+      }
+    } finally {
+      if (isMounted.current) setIsTyping(false);
+    }
+  }, [chatHistory, bot, selectedAI, updateGeminiUsage, botReplyDelay, isTyping, isMounted, onNewMessage]);
+
+  const handleSuggest = async () => {
+    if (isGeneratingSuggestion || isTyping) return;
+    setIsGeneratingSuggestion(true);
+    setIsMediaMenuOpen(false);
+
+    try {
+        const suggestion = await generateUserSuggestion(
+            chatHistory,
+            { name: bot.name, personality: bot.personality, conversationMode: bot.conversationMode, gender: bot.gender },
+            selectedAI
+        );
+        if (isMounted.current) setInput(suggestion);
+    } finally {
+        if (isMounted.current) setIsGeneratingSuggestion(false);
     }
   };
 
@@ -324,9 +364,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
     navigator.clipboard.writeText(text).then(() => {
         setCopiedMessageId(messageId);
         setTimeout(() => setCopiedMessageId(null), 2000);
-    }).catch(err => {
-        console.error("Failed to copy message:", err);
-    });
+    }).catch(err => console.error("Copy failed:", err));
   }, []);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
@@ -368,79 +406,73 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
             newHistory[messageIndex] = { ...newHistory[messageIndex], text: botResponseText, timestamp: Date.now() };
             onUpdateHistory(newHistory);
           }
-      } catch (error) {
-          console.error("Regeneration error:", error);
-      } finally {
-          if (isMounted.current) {
-            setIsTyping(false);
-          }
-      }
+      } catch (error) { console.error("Regeneration error:", error);
+      } finally { if (isMounted.current) setIsTyping(false); }
   }, [chatHistory, bot, selectedAI, onUpdateHistory, updateGeminiUsage, botReplyDelay]);
 
-  const handleEditClick = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleEditClick = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     onEdit(bot.id);
     setIsMenuOpen(false);
-  };
+  }, [onEdit, bot.id]);
 
-  const handlePersonaClick = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handlePersonaClick = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     window.location.hash = '#persona';
     setIsMenuOpen(false);
-  };
+  }, []);
 
-  const handleNewChatClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    onStartNewChat(bot.id);
+  const handleNewChatClick = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     setIsMenuOpen(false);
-  };
+    setTimeout(() => {
+        onUpdateHistory([]); 
+    }, 200);
+  }, [onUpdateHistory]);
 
-  const handleCopyPrompt = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleCopyPrompt = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     const promptToCopy = " . Reply in short, simple messages, just like a human would in a chat.";
     navigator.clipboard.writeText(promptToCopy).then(() => {
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
-    }, (err) => {
-        console.error('Failed to copy prompt: ', err);
     });
     setIsMenuOpen(false);
-  };
+  }, []);
 
-  const handleCopyConversation = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleCopyConversation = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     const convoText = chatHistory.map(m => m.text).join('\n\n');
-    
-    // Internal app-buffer as a fallback for permission policy blocks
-    localStorage.setItem('zia_internal_buffer', convoText);
-
     navigator.clipboard.writeText(convoText).then(() => {
         setCopyConvoSuccess(true);
         setTimeout(() => setCopyConvoSuccess(false), 2000);
-    }, (err) => {
-        console.warn('System clipboard blocked, using internal buffer instead.');
-        setCopyConvoSuccess(true);
-        setTimeout(() => setCopyConvoSuccess(false), 2000);
     });
     setIsMenuOpen(false);
-  };
+  }, [chatHistory]);
 
-  const handleOpenSettings = () => {
+  const handleOpenSettings = useCallback((e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
     setTempBrightness(bot.chatBackgroundBrightness ?? 100);
     setIsSettingsOpen(true);
     setIsMenuOpen(false);
-  };
+  }, [bot.chatBackgroundBrightness]);
   
   const handleSaveSettings = (newBrightness: number) => {
-    const updatePayload = {
-        id: bot.id,
-        chatBackgroundBrightness: newBrightness
-    };
-    onUpdateBot(updatePayload as BotProfile);
+    onUpdateBot({ ...bot, chatBackgroundBrightness: newBrightness });
   };
   
-  const handleOpenGallery = () => {
-      window.location.hash = '#photo';
+  const handleOpenGallery = () => { 
+    window.location.hash = '#photo';
+    setIsMediaMenuOpen(false);
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (input.trim()) {
+        handleSend(input);
+    } else {
+        handleContinue();
+    }
   };
 
   return (
@@ -466,7 +498,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
             </div>
         )}
       <header className="sticky top-0 flex items-center p-4 border-b border-white/10 dark:border-black/20 z-20 bg-light-bg/80 dark:bg-dark-bg/80 backdrop-blur-sm">
-        <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20">
+        <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <img src={botAvatar} alt={bot.name} className="h-10 w-10 rounded-lg object-cover ml-4 cursor-pointer" onClick={() => setPhotoToView(botAvatar)} onError={(e) => (e.target as HTMLImageElement).src = 'https://via.placeholder.com/40'} />
@@ -475,23 +507,23 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
         </div>
         <div className="text-sm text-gray-400 mr-2">ziaakia</div>
         <div className="relative" ref={menuRef}>
-            <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20">
+            <button onClick={(e) => { e.stopPropagation(); setIsMenuOpen(!isMenuOpen); }} className="p-2 rounded-full hover:bg-white/10 dark:hover:bg-black/20 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
             </button>
             {isMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl animate-fadeIn z-30">
-                    <a href="#" onClick={handleEditClick} className="block px-4 py-2 text-sm text-white hover:bg-accent rounded-t-lg">Edit Human</a>
-                    <a href="#" onClick={handlePersonaClick} className="block px-4 py-2 text-sm text-white hover:bg-accent">Persona</a>
-                    <a href="#" onClick={handleOpenSettings} className="block px-4 py-2 text-sm text-white hover:bg-accent">Chat Settings</a>
-                    <a href="#" onClick={handleCopyConversation} className="block px-4 py-2 text-sm text-white hover:bg-accent">{copyConvoSuccess ? 'Copied!' : 'Copy Conversation'}</a>
-                    <a href="#" onClick={handleCopyPrompt} className="block px-4 py-2 text-sm text-white hover:bg-accent">{copySuccess ? 'Copied!' : 'Copy Prompt'}</a>
-                    <a href="#" onClick={handleNewChatClick} className="block px-4 py-2 text-sm text-white hover:bg-accent rounded-b-lg">Start New Chat</a>
+                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl animate-fadeIn z-30 overflow-hidden border border-white/5">
+                    <button onPointerDown={handleEditClick} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors">Edit Human</button>
+                    <button onPointerDown={handlePersonaClick} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">Persona</button>
+                    <button onPointerDown={handleOpenSettings} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">Chat Settings</button>
+                    <button onPointerDown={handleCopyConversation} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">{copyConvoSuccess ? 'Copied!' : 'Copy Conversation'}</button>
+                    <button onPointerDown={handleCopyPrompt} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">{copySuccess ? 'Copied!' : 'Copy Prompt'}</button>
+                    <button onPointerDown={handleNewChatClick} className="w-full text-left px-4 py-3 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">Start New Chat</button>
                 </div>
             )}
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-4 space-y-1 z-10">
+      <main className="flex-1 overflow-y-auto p-4 space-y-1 z-10 no-scrollbar">
         {chatHistory.map((msg) => (
             <MessageItem 
                 key={msg.id}
@@ -511,7 +543,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
 
         {isTyping && (
           <div className="flex items-end gap-2 justify-start animate-fadeIn">
-            <img src={botAvatar} alt={bot.name} className="h-10 w-10 rounded-lg object-cover" onError={(e) => (e.target as HTMLImageElement).src = 'https://via.placeholder.com/40'} />
+            <img src={botAvatar} alt={bot.name} className="h-10 w-10 rounded-lg object-cover" />
             <div className="max-w-xs p-3 rounded-2xl bg-white/10 dark:bg-black/20 rounded-bl-none flex items-center min-h-[48px]">
                 <p className="text-sm italic opacity-70 font-medium transition-all duration-700 ease-in-out">
                     {thinkingText}
@@ -523,8 +555,7 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
       </main>
 
       <footer className="sticky bottom-0 p-4 bg-light-bg/80 dark:bg-dark-bg/80 backdrop-blur-sm z-20">
-        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="relative flex items-center gap-2">
-          
+        <form onSubmit={handleFormSubmit} className="relative flex items-center gap-2">
           <div className="relative flex-1">
             <textarea
                 value={input}
@@ -532,39 +563,89 @@ const ChatView: React.FC<ChatViewProps> = ({ bot, onBack, chatHistory, onNewMess
                 onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleSend(input);
+                    if (input.trim()) {
+                        handleSend(input);
+                    } else {
+                        handleContinue();
+                    }
                 }
                 }}
-                placeholder="Type your message..."
-                className={`w-full bg-white/10 dark:bg-black/20 p-4 pr-12 rounded-2xl border border-white/20 dark:border-black/20 focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 shadow-inner resize-none ${hasGalleryImages ? 'pl-14' : 'pl-4'}`}
+                placeholder={isGeneratingSuggestion ? "Generating draft..." : "Type your message..."}
+                disabled={isGeneratingSuggestion}
+                className="w-full bg-white/10 dark:bg-black/20 p-4 pr-12 rounded-2xl border border-white/20 dark:border-black/20 focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 shadow-inner resize-none pl-14"
                 rows={1}
             />
             
-            {/* Gallery Button - LEFT Side */}
-            {hasGalleryImages && (
-                <button
-                    type="button"
-                    onClick={handleOpenGallery}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-accent transition-colors z-10"
-                    aria-label="Open Gallery"
+            {/* STACKED MEDIA ACTION MENU - Left Side */}
+            <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center z-10" ref={mediaMenuRef}>
+                <button 
+                    type="button" 
+                    onClick={() => setIsMediaMenuOpen(!isMediaMenuOpen)} 
+                    className={`p-2 rounded-full transition-all duration-300 ${isMediaMenuOpen ? 'bg-accent text-white rotate-90 scale-110' : 'text-gray-400 hover:text-accent'}`}
                 >
                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                    </svg>
                 </button>
-            )}
 
-             {/* Send Button */}
-             <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-accent rounded-full text-white transition-transform hover:scale-110 disabled:opacity-50 z-10"
-                disabled={!input.trim() || isTyping}
-                aria-label="Send message"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-            </button>
+                {isMediaMenuOpen && (
+                    <div className="absolute bottom-full left-0 mb-4 w-56 bg-gray-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl animate-fadeIn overflow-hidden">
+                        <button 
+                            type="button" 
+                            onClick={() => { handleOpenGallery(); sessionStorage.setItem('gallery_tab', 'photos'); }}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors text-left"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            <span className="text-sm font-bold">Image Gallery</span>
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={() => { handleOpenGallery(); sessionStorage.setItem('gallery_tab', 'videos'); }}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors text-left border-t border-white/5"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            <span className="text-sm font-bold">Video Gallery</span>
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={handleSuggest}
+                            disabled={isGeneratingSuggestion}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors text-left border-t border-white/5 disabled:opacity-50"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 text-accent group-hover:text-white ${isGeneratingSuggestion ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            <span className="text-sm font-bold">Auto-Suggest Message</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+            
+            {/* DYNAMIC ACTION BUTTONS: Positioned on the RIGHT of the text zone */}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center z-10">
+                {!input.trim() ? (
+                    <button 
+                        type="button" 
+                        onClick={handleContinue}
+                        className="p-2 bg-accent/80 hover:bg-accent rounded-full text-white transition-all transform hover:scale-110 disabled:opacity-50"
+                        disabled={isTyping}
+                        title="Continue Conversation"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                ) : (
+                    <button 
+                        type="submit" 
+                        className="p-2 bg-accent rounded-full text-white transition-all transform hover:scale-110 disabled:opacity-50"
+                        disabled={isTyping}
+                        title="Send Message"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                        </svg>
+                    </button>
+                )}
+            </div>
           </div>
         </form>
       </footer>

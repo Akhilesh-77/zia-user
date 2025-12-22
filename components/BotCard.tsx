@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import type { BotProfile } from '../types';
 import { generateDynamicDescription } from '../services/geminiService';
@@ -53,45 +52,34 @@ const SwipeToChatButton: React.FC<{ botName: string; onSwiped: () => void; }> = 
         setThumbX(0);
     };
     
-    const onMouseDown = (e: React.MouseEvent) => handleDragStart(e.clientX);
-    const onMouseMove = (e: MouseEvent) => { if(isDragging) handleDragMove(e.clientX) };
-    const onMouseUp = () => handleDragEnd();
-    const onMouseLeave = () => handleDragEnd();
-
-    const onTouchStart = (e: React.TouchEvent) => handleDragStart(e.touches[0].clientX);
-    const onTouchMove = (e: React.TouchEvent) => handleDragMove(e.touches[0].clientX);
-    const onTouchEnd = () => handleDragEnd();
-
-    useEffect(() => {
-        if (isDragging) {
-            window.addEventListener('mousemove', onMouseMove);
-            window.addEventListener('mouseup', onMouseUp);
-        } else {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
+    // Cross-browser Pointer Events (Fix for Edge/AI Studio)
+    const onPointerDown = (e: React.PointerEvent) => {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        handleDragStart(e.clientX);
+    };
+    const onPointerMove = (e: React.PointerEvent) => { if(isDragging) handleDragMove(e.clientX) };
+    const onPointerUp = (e: React.PointerEvent) => {
+        if(isDragging) {
+            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+            handleDragEnd();
         }
-        return () => {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-        };
-    }, [isDragging, onMouseMove, onMouseUp]);
-
+    };
 
     return (
         <div 
             ref={trackRef}
-            className="w-full h-20 bg-black/30 rounded-full flex items-center p-2 relative shadow-lg backdrop-blur-sm mt-4"
+            className="w-full h-20 bg-black/30 rounded-full flex items-center p-2 relative shadow-lg backdrop-blur-sm mt-4 touch-none"
+            style={{ touchAction: 'none' }}
             onClick={(e) => e.stopPropagation()}
-            onMouseLeave={onMouseLeave}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
         >
             <div 
                 ref={thumbRef}
-                className="h-16 w-16 bg-accent rounded-full flex items-center justify-center cursor-pointer select-none"
-                style={{ transform: `translateX(${thumbX}px)` }}
-                onMouseDown={onMouseDown}
-                onTouchStart={onTouchStart}
+                className="h-16 w-16 bg-accent rounded-full flex items-center justify-center cursor-pointer select-none touch-none"
+                style={{ transform: `translateX(${thumbX}px)`, touchAction: 'none' }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
             </div>
@@ -102,19 +90,10 @@ const SwipeToChatButton: React.FC<{ botName: string; onSwiped: () => void; }> = 
 
 const BotPreviewModal: React.FC<{ bot: BotProfile, onSwiped: () => void, onClose: () => void }> = ({ bot, onSwiped, onClose }) => {
     const [isClosing, setIsClosing] = useState(false);
-    const [showConfig, setShowConfig] = useState(false);
-
     const handleClose = () => {
         setIsClosing(true);
-        setTimeout(onClose, 300); // Duration of the animation
+        setTimeout(onClose, 300);
     };
-
-    const structuredConfig = `Human Name: ${bot.name}
-Short Description: ${bot.description}
-Scenario (Opening Message): ${bot.scenario}
-
-Human Personality Prompt:
-${bot.personality}`;
 
     return (
         <div 
@@ -125,37 +104,8 @@ ${bot.personality}`;
                 className={`w-full max-w-md relative transition-transform duration-300 ${isClosing ? 'scale-95' : 'scale-100'}`}
                 onClick={e => e.stopPropagation()}
             >
-                {!showConfig ? (
-                    <img src={bot.photo} alt={bot.name} className="w-full h-auto max-h-[50vh] object-contain rounded-2xl shadow-2xl" />
-                ) : (
-                    <div className="w-full h-[50vh] bg-dark-bg p-6 rounded-2xl shadow-2xl border border-white/10 flex flex-col animate-fadeIn">
-                        <h3 className="text-xl font-bold mb-4">Bot Configuration</h3>
-                        <textarea 
-                            readOnly 
-                            value={structuredConfig} 
-                            className="flex-1 bg-black/20 p-4 rounded-xl border border-white/10 text-sm font-mono text-gray-300 resize-none no-scrollbar outline-none focus:ring-1 focus:ring-accent"
-                        />
-                        <button 
-                            onClick={() => {
-                                navigator.clipboard.writeText(structuredConfig);
-                                alert("Configuration copied to clipboard.");
-                            }}
-                            className="mt-4 bg-accent/20 text-accent font-bold py-2 rounded-xl border border-accent/30 hover:bg-accent/30 transition-colors"
-                        >
-                            Copy to Clipboard
-                        </button>
-                    </div>
-                )}
-
-                <div className="mt-4 flex flex-col gap-2">
-                    <button 
-                        onClick={() => setShowConfig(!showConfig)}
-                        className="text-xs uppercase tracking-widest text-gray-400 font-bold hover:text-white transition-colors py-2"
-                    >
-                        {showConfig ? '← Show Profile' : 'View AI Studio Config →'}
-                    </button>
-                    <SwipeToChatButton botName={bot.name} onSwiped={onSwiped} />
-                </div>
+                <img src={bot.photo} alt={bot.name} className="w-full h-auto max-h-[70vh] object-contain rounded-2xl shadow-2xl" />
+                <SwipeToChatButton botName={bot.name} onSwiped={onSwiped} />
             </div>
              <button onClick={handleClose} className="absolute top-5 right-5 bg-black/50 text-white rounded-full h-10 w-10 flex items-center justify-center font-bold text-2xl shadow-lg backdrop-blur-sm">&times;</button>
         </div>
@@ -169,7 +119,6 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
     const menuRef = useRef<HTMLDivElement>(null);
 
     const fetchDescription = async () => {
-        // Fallback to static description if personality is empty
         if (!bot.personality.trim()) {
             setDynamicDesc(bot.description);
             return;
@@ -180,7 +129,6 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
 
     useEffect(() => {
         fetchDescription();
-        // Refresh description every 15 seconds
         const interval = setInterval(fetchDescription, 15000);
         return () => clearInterval(interval);
     }, [bot.id, bot.personality]);
@@ -196,6 +144,29 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const handleCloneClick = (e: React.PointerEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onClone) onClone();
+        setMenuOpen(false);
+    };
+
+    const handleDeleteClick = (e: React.PointerEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // FORCE EXECUTION: Call the functional logic immediately on down-stroke
+        // to ensure it is registered before the component can unmount or the container blocks it.
+        if (onDelete) onDelete();
+        setMenuOpen(false);
+    };
+
+    const handleEditClick = (e: React.PointerEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onEdit) onEdit();
+        setMenuOpen(false);
+    };
+
     return (
         <div className="bg-white/5 dark:bg-black/10 rounded-2xl p-4 flex flex-col transition-all duration-300 hover:scale-105 hover:shadow-accent/20 shadow-lg relative">
             {modalVisible && <BotPreviewModal bot={bot} onSwiped={onChat} onClose={() => setModalVisible(false)} />}
@@ -204,21 +175,24 @@ const BotCard: React.FC<BotCardProps> = ({ bot, onChat, onEdit, onDelete, onClon
                     <img src={bot.photo} alt={bot.name} className="w-full h-40 object-cover rounded-lg mb-4 cursor-pointer" onClick={() => setModalVisible(true)} loading="lazy" />
                 </div>
                 <h3 className="font-bold text-lg">{bot.name}</h3>
-                <p className="text-sm text-gray-400 dark:text-gray-300 flex-1 italic">
+                <p className="text-sm text-gray-400 dark:text-gray-300 flex-1 italic line-clamp-2">
                     "{dynamicDesc || bot.description}"
                 </p>
             </div>
 
             {(onEdit || onDelete || onClone) && (
                 <div ref={menuRef} className="absolute top-5 right-5 z-10">
-                    <button onClick={() => setMenuOpen(!menuOpen)} className="p-1 rounded-full bg-black/30 hover:bg-black/50 text-white">
+                    <button 
+                        onPointerDown={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }} 
+                        className="p-1 rounded-full bg-black/30 hover:bg-black/50 text-white transition-colors"
+                    >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
                     </button>
                     {menuOpen && (
-                        <div className="absolute right-0 mt-2 w-32 bg-gray-800 rounded-lg shadow-xl animate-fadeIn z-20">
-                            {onEdit && <a href="#" onClick={(e) => { e.preventDefault(); onEdit(); setMenuOpen(false); }} className="block px-4 py-2 text-sm text-white hover:bg-accent rounded-t-lg">Edit</a>}
-                            {onClone && <a href="#" onClick={(e) => { e.preventDefault(); onClone?.(); setMenuOpen(false); }} className="block px-4 py-2 text-sm text-white hover:bg-accent">Clone</a>}
-                            {onDelete && <a href="#" onClick={(e) => { e.preventDefault(); onDelete(); setMenuOpen(false); }} className="block px-4 py-2 text-sm text-white hover:bg-red-500 rounded-b-lg">Delete</a>}
+                        <div className="absolute right-0 mt-2 w-32 bg-gray-800 rounded-lg shadow-xl animate-fadeIn z-20 overflow-hidden border border-white/5">
+                            {onEdit && <button onPointerDown={handleEditClick} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-accent transition-colors">Edit</button>}
+                            {onClone && <button onPointerDown={handleCloneClick} className="w-full text-left px-4 py-2.5 text-sm text-white hover:bg-accent transition-colors border-t border-white/5">Clone</button>}
+                            {onDelete && <button onPointerDown={handleDeleteClick} className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-red-500 hover:text-white transition-colors border-t border-white/5">Delete</button>}
                         </div>
                     )}
                 </div>

@@ -22,6 +22,7 @@ interface UserData {
 }
 
 const OLD_STORAGE_KEY = 'zia_userData';
+const SHADOW_BACKUP_KEY = 'zia_shadow_persistence_v1';
 
 // Define new keys for individual data pieces
 const KEYS: { [K in keyof UserData]: string } = {
@@ -41,68 +42,67 @@ const KEYS: { [K in keyof UserData]: string } = {
     apiKeys: 'zia_apiKeys',
 };
 
+// Internal helper to sync to a secondary storage layer (Resilience)
+const syncShadowBackup = (data: Partial<UserData>) => {
+    try {
+        const existingShadow = localStorage.getItem(SHADOW_BACKUP_KEY);
+        const shadowObj = existingShadow ? JSON.parse(existingShadow) : {};
+        const updatedShadow = { ...shadowObj, ...data };
+        // We limit history in shadow backup to prevent storage limits, 
+        // but prioritize bot configs and recent messages.
+        localStorage.setItem(SHADOW_BACKUP_KEY, JSON.stringify(updatedShadow));
+    } catch (e) {
+        console.warn("Shadow backup failed (likely storage limit)", e);
+    }
+};
 
 // Migrates data from the old single-key format to the new multi-key format.
 export const migrateData = async (): Promise<void> => {
     try {
         const oldData = await localforage.getItem(OLD_STORAGE_KEY);
         if (oldData) {
-            console.log("Old data format found. Migrating to new format...");
             const data = oldData as UserData;
-            
             const promises = Object.entries(data).map(([key, value]) => {
                 const newKey = KEYS[key as keyof UserData];
-                if (newKey) {
-                    return localforage.setItem(newKey, value);
-                }
+                if (newKey) return localforage.setItem(newKey, value);
                 return Promise.resolve();
             });
-
             await Promise.all(promises);
             await localforage.removeItem(OLD_STORAGE_KEY);
-            console.log("Migration successful.");
+            syncShadowBackup(data);
         }
     } catch (error) {
-        console.error("Failed during data migration:", error);
+        console.error("Migration failed:", error);
     }
 };
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let pendingData: Partial<UserData> = {};
 
-// Saves parts of the app's data under their respective keys.
-// Uses debouncing to batch multiple rapid updates (like typing or rapid nav) into fewer DB writes.
 export const saveUserData = async (data: Partial<UserData>): Promise<void> => {
-    // Merge new data into pending queue
     pendingData = { ...pendingData, ...data };
+    if (saveTimeout) clearTimeout(saveTimeout);
 
-    // Clear existing timer if any
-    if (saveTimeout) {
-        clearTimeout(saveTimeout);
-    }
-
-    // Set a new timer to save data after a short delay
     saveTimeout = setTimeout(async () => {
         const dataToSave = { ...pendingData };
-        pendingData = {}; // Clear pending immediately
+        pendingData = {};
         saveTimeout = null;
 
         try {
             const promises = Object.entries(dataToSave).map(([key, value]) => {
                 const typedKey = key as keyof UserData;
-                if (KEYS[typedKey]) {
-                    return localforage.setItem(KEYS[typedKey], value);
-                }
+                if (KEYS[typedKey]) return localforage.setItem(KEYS[typedKey], value);
                 return Promise.resolve();
             });
             await Promise.all(promises);
+            // Redundancy layer
+            syncShadowBackup(dataToSave);
         } catch (error) {
             console.error(`Failed to save data`, error);
         }
-    }, 500); // 500ms debounce
+    }, 500);
 };
 
-// Loads all data for the user from individual keys.
 export const loadUserData = async (): Promise<Partial<UserData>> => {
     try {
         const keyNames = Object.keys(KEYS) as (keyof UserData)[];
@@ -110,11 +110,24 @@ export const loadUserData = async (): Promise<Partial<UserData>> => {
         const values = await Promise.all(promises);
 
         const data: Partial<UserData> = {};
+        let hasData = false;
         keyNames.forEach((key, index) => {
             if (values[index] !== null && values[index] !== undefined) {
                 (data as any)[key] = values[index];
+                hasData = true;
             }
         });
+
+        // SHADOW RECOVERY: If primary DB is empty but shadow has data, restore it
+        if (!hasData || !data.bots || data.bots.length === 0) {
+            const shadow = localStorage.getItem(SHADOW_BACKUP_KEY);
+            if (shadow) {
+                const shadowData = JSON.parse(shadow);
+                console.log("Database empty. Recovering from Shadow Persistence...");
+                return shadowData;
+            }
+        }
+
         return data;
     } catch (error) {
         console.error(`Failed to load data`, error);
@@ -122,10 +135,10 @@ export const loadUserData = async (): Promise<Partial<UserData>> => {
     }
 };
 
-// Clears all data for the user.
 export const clearUserData = async (): Promise<void> => {
     try {
         await Promise.all(Object.values(KEYS).map(key => localforage.removeItem(key)));
+        localStorage.removeItem(SHADOW_BACKUP_KEY);
     } catch (error) {
         console.error(`Failed to clear data`, error);
     }

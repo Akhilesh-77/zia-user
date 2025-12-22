@@ -54,7 +54,6 @@ const App: React.FC = () => {
   const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // FIX: Default to a modern Gemini 3 model.
   const [selectedAI, setSelectedAI] = useState<AIModelOption>('gemini-3-flash-preview');
   const [voicePreference, setVoicePreference] = useState<VoicePreference | null>(null);
   const [hasConsented, setHasConsented] = useState<boolean>(false);
@@ -202,15 +201,47 @@ const App: React.FC = () => {
   }, [bots]);
 
   const handleDeleteBot = useCallback((id: string) => {
-    if (window.confirm("Are you sure?")) {
-        setBots(prev => prev.filter(b => b.id !== id));
-        setChatHistories(prev => { const n = { ...prev }; delete n[id]; return n; });
-    }
+    setBots(prev => prev.filter(b => b.id !== id));
+    setChatHistories(prev => {
+        const { [id]: _, ...rest } = prev;
+        return rest;
+    });
   }, []);
 
+  const handleCloneBot = useCallback((id: string) => {
+    const botToClone = bots.find(b => b.id === id);
+    if (botToClone) {
+        const newId = `bot-clone-${Date.now()}`;
+        const clonedBot: BotProfile = {
+            ...botToClone,
+            id: newId,
+            name: `${botToClone.name} (Clone)`,
+            restoredHistory: []
+        };
+        setBots(prev => [...prev, clonedBot]);
+        setChatHistories(prev => ({ ...prev, [newId]: [] }));
+        alert(`Cloned ${botToClone.name} successfully!`);
+    }
+  }, [bots]);
+
   const handleSaveBot = useCallback((botData: Omit<BotProfile, 'id'> | BotProfile) => {
-    if ('id' in botData) { setBots(prev => prev.map(b => b.id === botData.id ? { ...b, ...botData } : b)); } 
-    else { setBots(prev => [...prev, { ...botData, id: `bot-${Date.now()}` } as BotProfile]); }
+    let finalId: string;
+    if ('id' in botData) { 
+        setBots(prev => prev.map(b => b.id === botData.id ? { ...b, ...botData } : b)); 
+        finalId = botData.id;
+    } 
+    else { 
+        finalId = `bot-${Date.now()}`;
+        setBots(prev => [...prev, { ...botData, id: finalId } as BotProfile]); 
+    }
+
+    if (botData.restoredHistory) {
+        setChatHistories(prev => ({
+            ...prev,
+            [finalId]: botData.restoredHistory!
+        }));
+    }
+
     setBotToEdit(null);
   }, []);
   
@@ -252,15 +283,6 @@ const App: React.FC = () => {
     setChatHistories(prev => ({ ...prev, [botId]: newHistory }));
   }, []);
 
-  const handleStartNewChat = useCallback((botId: string) => {
-    if (window.confirm("Start new chat?")) {
-      setChatHistories(prev => {
-        const bot = bots.find(b => b.id === botId);
-        return { ...prev, [botId]: bot?.scenario ? [{ id: `bot-reset-${Date.now()}`, text: bot.scenario, sender: 'bot', timestamp: Date.now() }] : [] };
-      });
-    }
-  }, [bots]);
-
   const handleClearData = useCallback(async () => {
       if (window.confirm("Clear all data?")) {
         await clearUserData();
@@ -290,14 +312,14 @@ const App: React.FC = () => {
   const renderPage = () => {
     if (!isDataLoaded) return <div className="h-full w-full flex flex-col items-center justify-center bg-dark-bg text-white gap-4"><div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin"></div><p className="text-gray-400 font-medium">Initializing Zia...</p></div>;
     switch(currentPage) {
-      case 'home': return <HomePage bots={bots} botUsage={botUsage} chatHistories={chatHistories} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={(id) => {}} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onOpenSettings={() => window.location.hash = '#settings'} />;
-      case 'humans': return <BotsPage bots={bots} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={(id) => {}} />;
+      case 'home': return <HomePage bots={bots} botUsage={botUsage} chatHistories={chatHistories} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={handleCloneBot} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onOpenSettings={() => window.location.hash = '#settings'} />;
+      case 'humans': return <BotsPage bots={bots} onSelectBot={handleSelectBot} onEditBot={handleEditBot} onDeleteBot={handleDeleteBot} onCloneBot={handleCloneBot} />;
       case 'create': return <CreationForm onSaveBot={handleSaveBot} onNavigate={handleNavigate} botToEdit={botToEdit} />;
       case 'story': return <ScenarioGeneratorPage />;
       case 'personas': return <PersonasPage personas={personas} bots={bots} onSave={handleSavePersona} onDelete={handleDeletePersona} onAssign={handleAssignPersona} />;
       case 'vault': return <ApiVaultPage apiKeys={apiKeys} onSaveKey={handleSaveApiKey} onDeleteKey={handleDeleteApiKey} />;
       case 'stats': return <StatsDashboard bots={bots} personas={personas} chatHistories={chatHistories} sessions={sessions} onBack={() => window.location.hash = '#home'} />;
-      case 'chat': return effectiveBot ? <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(m) => handleNewMessage(effectiveBot.id, m)} onUpdateHistory={(h) => handleUpdateHistory(effectiveBot.id, h)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} onStartNewChat={handleStartNewChat} currentUser={defaultUser} logSession={logSession} updateGeminiUsage={updateGeminiUsage} botReplyDelay={botReplyDelay} /> : <div className="h-full w-full flex items-center justify-center">Loading...</div>;
+      case 'chat': return effectiveBot ? <ChatView bot={effectiveBot} onBack={() => window.location.hash = '#home'} chatHistory={chatHistories[effectiveBot.id] || []} onNewMessage={(m) => handleNewMessage(effectiveBot.id, m)} onUpdateHistory={(h) => handleUpdateHistory(effectiveBot.id, h)} onUpdateBot={handleSaveBot} selectedAI={selectedAI} voicePreference={voicePreference} onEdit={handleEditBot} currentUser={defaultUser} logSession={logSession} updateGeminiUsage={updateGeminiUsage} botReplyDelay={botReplyDelay} /> : <div className="h-full w-full flex items-center justify-center">Loading...</div>;
       case 'photo': return selectedBot ? <PhotoGalleryPage bot={selectedBot} onBack={() => window.location.hash = '#chatview'} /> : null;
       case 'version': return <VersionPage onBack={() => window.location.hash = '#home'} />;
       default: return null;
@@ -306,7 +328,6 @@ const App: React.FC = () => {
 
   return (
     <div className={`w-full h-full max-w-md mx-auto flex flex-col font-sans shadow-2xl overflow-hidden relative ${theme}`}>
-      {/* FIX: Corrected onSelectAI prop mapping to the state setter. */}
       <SettingsPanel isOpen={isSettingsOpen} onClose={() => window.location.hash = lastHash.current || '#home'} theme={theme} toggleTheme={() => setTheme(t => t === 'light' ? 'dark' : 'light')} onClearData={handleClearData} selectedAI={selectedAI} onSelectAI={setSelectedAI} voicePreference={voicePreference} onSetVoicePreference={setVoicePreference} hasConsented={hasConsented} onConsentChange={handleConsentChange} onNavigate={handleNavigate} geminiUsage={geminiUsage} botReplyDelay={botReplyDelay} onSetBotReplyDelay={setBotReplyDelay} />
       <div className="flex-1 overflow-hidden">{renderPage()}</div>
       {currentPage !== 'chat' && currentPage !== 'stats' && currentPage !== 'photo' && currentPage !== 'version' && (

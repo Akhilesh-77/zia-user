@@ -17,7 +17,7 @@ const getGeminiClient = () => {
 // 🛠️ ERROR HANDLING & RECOVERY
 // ------------------------------------------------------------------
 const mapErrorToMessage = (error: any): string => {
-    const msg = String(error?.message || error || "").toLowerCase();
+    const msg = String(error?.message || error?.error?.message || error || "").toLowerCase();
     console.error("Zia.ai System Error:", error);
 
     if (msg.includes("429") || msg.includes("quota") || msg.includes("limit reached")) {
@@ -25,6 +25,12 @@ const mapErrorToMessage = (error: any): string => {
     }
     if (msg.includes("network") || msg.includes("fetch")) {
         return "(System: Connection issue detected. Check your network.)";
+    }
+    if (msg.includes("invalid_argument") && msg.includes("user role")) {
+        return "(System: Conversation sequence error. Please send a message manually to reset.)";
+    }
+    if (msg.includes("contents are required")) {
+        return "(System: The conversation is empty. Please send a message to start.)";
     }
     return "(System: Something went wrong. Please resend your message.)";
 };
@@ -34,10 +40,46 @@ const mapErrorToMessage = (error: any): string => {
 // ------------------------------------------------------------------
 
 /**
+ * Generates a suggestion for the user to say next.
+ */
+export const generateUserSuggestion = async (
+    history: ChatMessage[],
+    bot: Pick<BotProfile, 'name' | 'personality' | 'conversationMode' | 'gender'>,
+    modelId: AIModelOption = 'gemini-3-flash-preview'
+): Promise<string> => {
+    try {
+        const ai = getGeminiClient();
+        const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
+
+        const contextText = history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n');
+        
+        const systemInstruction = `You are a creative writing assistant. 
+Based on the conversation history with ${bot.name} (Personality: ${bot.personality}), 
+write ONE short, natural-sounding message the USER could say next. 
+Keep it in the user's POV. Use plain text. No quotes. No asterisks unless they are describing a brief action. 
+Make it fit the current mode: ${bot.conversationMode || 'normal'}. 
+ONLY return the suggested message text.`;
+
+        const response = await ai.models.generateContent({
+            model: activeModel,
+            contents: [{ role: 'user', parts: [{ text: `Based on this conversation:\n${contextText}\n\nSuggest a next message for me.` }] }],
+            config: {
+                systemInstruction,
+                temperature: 0.8,
+            }
+        });
+
+        return response.text?.trim() || "What should we talk about next?";
+    } catch (error) {
+        console.error("Suggestion error:", error);
+        return "Hey, tell me more about that.";
+    }
+};
+
+/**
  * Generates the chatbot's response using the selected model.
  * This is the ONLY function allowed to consume API quota.
  */
-// FIX: Updated default modelId to 'gemini-3-flash-preview' and improved model selection logic.
 export const generateBotResponse = async (
     history: ChatMessage[],
     bot: Pick<BotProfile, 'name' | 'personality' | 'isSpicy' | 'conversationMode' | 'gender'>,
@@ -65,15 +107,29 @@ export const generateBotResponse = async (
 
         const ai = getGeminiClient();
         
-        // FIX: Dynamically select model based on modelId or fallback to gemini-3-flash-preview.
         const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
+
+        // Prepare contents for Gemini API
+        const contents = history.map(m => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: m.text || " " }]
+        }));
+
+        // CRITICAL FIX 1: Gemini API requires contents to be non-empty.
+        // If history is empty (e.g., clicking Continue on a fresh bot), provide a starting nudge.
+        if (contents.length === 0) {
+            contents.push({ role: 'user', parts: [{ text: "Hello!" }] });
+        } 
+        // CRITICAL FIX 2: Gemini API requires multi-turn requests to end with a 'user' role.
+        // When clicking "Continue", the last message in history is often from the 'model'.
+        // We append a subtle "Go on" prompt from the user role to trigger the continuation.
+        else if (contents[contents.length - 1].role === 'model') {
+            contents.push({ role: 'user', parts: [{ text: "..." }] });
+        }
 
         const response = await ai.models.generateContent({
             model: activeModel,
-            contents: history.map(m => ({
-                role: m.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: m.text }]
-            })),
+            contents,
             config: {
                 systemInstruction,
                 temperature: 0.9,
@@ -82,7 +138,7 @@ export const generateBotResponse = async (
             }
         });
 
-        // FIX: Access response.text directly (property, not a method).
+        // Use the .text property directly
         const text = response.text || "(The human is lost in thought...)";
         onSuccess?.();
         return text;
@@ -98,10 +154,8 @@ export const generateBotResponse = async (
 
 /**
  * FIXED: Local description generator to replace API-eating version.
- * Now returns a clean excerpt from personality to save quota.
  */
 export const generateDynamicDescription = async (personality: string): Promise<string> => {
-    // Extract a short, catchy sentence from the start of the personality prompt
     if (!personality) return "A unique AI persona.";
     
     const firstSentence = personality.split(/[.!?]/)[0].trim();
@@ -109,10 +163,9 @@ export const generateDynamicDescription = async (personality: string): Promise<s
 };
 
 // ------------------------------------------------------------------
-// 🛑 IMAGE & CODE TOOLS (RE-ENABLED FOLLOWING SDK GUIDELINES)
+// 🛑 IMAGE & CODE TOOLS
 // ------------------------------------------------------------------
 
-// FIX: Implemented generateImage using gemini-2.5-flash-image and correct part handling.
 export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
     const ai = getGeminiClient();
     const parts: any[] = [{ text: prompt }];
@@ -143,12 +196,10 @@ export const generateImage = async (prompt: string, sourceImage?: string | null)
     throw new Error("No image was generated by the model.");
 };
 
-// FIX: Stubbed generateScenario to prevent errors in components while keeping it minimal.
 export const generateScenario = async (): Promise<string> => {
     return "Scenario generation is disabled. Please write your own opening message!";
 };
 
-// FIX: Implemented generateCodePrompt using gemini-3-pro-preview for complex reasoning.
 export const generateCodePrompt = async (task: string, language: string): Promise<string> => {
     const ai = getGeminiClient();
     const prompt = `Generate a highly detailed and optimized prompt that can be used to write production-ready code for the following task: "${task}". Target language/framework: "${language}".`;

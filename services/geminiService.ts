@@ -26,23 +26,41 @@ export const resetApiState = () => {
  * LAZY ENV KEY RESOLUTION (MANDATORY)
  * Resolves keys dynamically at request time. Never cached in memory.
  */
-const resolveKey = (provider: 'gemini' | 'deepseek'): string => {
-    const key = provider === 'gemini' 
-        ? ((process.env as any).GEMINI_API_KEY || process.env.API_KEY)
-        : (process.env as any).DEEPSEEK_API_KEY;
-    
-    if (!key) {
-        throw { status: 'MISSING_KEY', message: `${provider.toUpperCase()}_API_KEY is not set in the environment.` };
+const resolveKey = (provider: 'gemini' | 'deepseek'): string | null => {
+    try {
+        const env =
+            typeof process !== 'undefined' && process.env
+                ? (process.env as any)
+                : null;
+
+        if (!env) return null;
+
+        const key =
+            provider === 'gemini'
+                ? env.GEMINI_API_KEY || env.API_KEY
+                : env.DEEPSEEK_API_KEY;
+
+        if (typeof key !== 'string' || key.trim().length < 10) {
+            return null; // soft fail, no poisoning
+        }
+
+        return key.trim();
+    } catch {
+        return null;
     }
-    return key;
 };
+
 
 // ------------------------------------------------------------------
 // 🛠️ LAZY PROVIDER EXECUTION
 // ------------------------------------------------------------------
 
 const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = resolveKey('deepseek'); // Resolved at request time
+   const key = resolveKey('deepseek');
+if (!key) {
+    throw { status: 'MISSING_KEY', message: 'DeepSeek API key not available at runtime.' };
+}
+ // Resolved at request time
 
     const systemInstruction = xyz(
         history, 
@@ -84,7 +102,11 @@ const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: 
 };
 
 const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = resolveKey('gemini'); // Resolved at request time
+    const key = resolveKey('gemini');
+if (!key) {
+    throw { status: 'MISSING_KEY', message: 'Gemini API key not available at runtime.' };
+}
+ // Resolved at request time
     
     // Defer initialization to request time
     const ai = new GoogleGenAI({ apiKey: key });

@@ -5,71 +5,44 @@ import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🛡️ ISOLATED PROVIDER REGISTRY (CRASH-SAFE)
+// 🛡️ TRANSIENT PROVIDER STATE (CRASH-SAFE)
 // ------------------------------------------------------------------
-type ProviderState = {
-    verifiedQuota: boolean;
-    lastError: string | null;
-    retryActive: boolean;
-    keyHash: string | null;
-};
-
-// Isolated memory slots for each provider
-const providerRegistry: Record<string, ProviderState> = {
-    gemini: { verifiedQuota: false, lastError: null, retryActive: false, keyHash: null },
-    deepseek: { verifiedQuota: false, lastError: null, retryActive: false, keyHash: null }
-};
-
-let currentProviderId: 'gemini' | 'deepseek' | 'local' = 'gemini';
-
-/**
- * RESOLVE API KEYS FROM ENV (MANDATORY)
- * Fetches keys exclusively from environment variables.
- */
-const getEnvKey = (provider: 'gemini' | 'deepseek'): string | undefined => {
-    if (provider === 'gemini') {
-        // Fallback to API_KEY to satisfy system requirements if GEMINI_API_KEY is missing
-        return (process.env as any).GEMINI_API_KEY || process.env.API_KEY;
-    }
-    if (provider === 'deepseek') {
-        return (process.env as any).DEEPSEEK_API_KEY;
-    }
-    return undefined;
-};
+// These flags are reset frequently to prevent stale error inheritance
+let geminiRetryActive = false;
+let deepseekRetryActive = false;
 
 /**
  * HARD PROVIDER STATE RESET
- * Fully destroys associated state for a provider without app reload.
- * Triggered on key change or manual error deletion.
+ * Fully destroys all transient flags and error trackers.
+ * Guaranteed to be called on error deletion or provider switch.
  */
-export const resetApiState = (providerId?: 'gemini' | 'deepseek') => {
-    const targets = providerId ? [providerId] : (['gemini', 'deepseek'] as const);
-    
-    targets.forEach(id => {
-        providerRegistry[id] = { 
-            verifiedQuota: false, 
-            lastError: null, 
-            retryActive: false, 
-            keyHash: getEnvKey(id as any) || null 
-        };
-    });
-    
-    console.log(`Zia.ai: Hard State Reset executed for ${providerId || 'all providers'}.`);
+export const resetApiState = () => {
+  geminiRetryActive = false;
+  deepseekRetryActive = false;
+  console.log("Zia.ai: Hard Provider State Reset executed. All transient flags purged.");
 };
 
-const getProviderForModel = (modelId: string): 'gemini' | 'deepseek' | 'local' => {
-    if (modelId === 'local-offline') return 'local';
-    if (modelId.startsWith('deepseek-')) return 'deepseek';
-    return 'gemini';
+/**
+ * LAZY ENV KEY RESOLUTION (MANDATORY)
+ * Resolves keys dynamically at request time. Never cached in memory.
+ */
+const resolveKey = (provider: 'gemini' | 'deepseek'): string => {
+    const key = provider === 'gemini' 
+        ? ((process.env as any).GEMINI_API_KEY || process.env.API_KEY)
+        : (process.env as any).DEEPSEEK_API_KEY;
+    
+    if (!key) {
+        throw { status: 'MISSING_KEY', message: `${provider.toUpperCase()}_API_KEY is not set in the environment.` };
+    }
+    return key;
 };
 
 // ------------------------------------------------------------------
-// 🛠️ ISOLATED PROVIDER EXECUTION
+// 🛠️ LAZY PROVIDER EXECUTION
 // ------------------------------------------------------------------
 
 const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = getEnvKey('deepseek');
-    if (!key) throw new Error("DEEPSEEK_API_KEY is missing in environment.");
+    const key = resolveKey('deepseek'); // Resolved at request time
 
     const systemInstruction = xyz(
         history, 
@@ -103,7 +76,6 @@ const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: 
         const errData = await response.json().catch(() => ({}));
         const error: any = new Error(errData?.error?.message || response.statusText);
         error.status = response.status;
-        error.provider = 'deepseek';
         throw error;
     }
 
@@ -112,9 +84,9 @@ const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: 
 };
 
 const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = getEnvKey('gemini');
-    if (!key) throw new Error("GEMINI_API_KEY is missing in environment.");
+    const key = resolveKey('gemini'); // Resolved at request time
     
+    // Defer initialization to request time
     const ai = new GoogleGenAI({ apiKey: key });
     const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
     
@@ -136,23 +108,25 @@ const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: an
 };
 
 // ------------------------------------------------------------------
-// 🔍 TRUE QUOTA VALIDATION & ERROR NORMALIZATION
+// 🔍 ERROR NORMALIZATION
 // ------------------------------------------------------------------
-const parseAiError = (error: any, provider: string): string => {
+const mapErrorToMessage = (error: any, provider: string): string => {
     const status = error?.status;
     const msg = String(error?.message || "").toLowerCase();
 
-    // TRUE DAILY LIMIT VALIDATION (Explicit Metadata Only)
+    if (status === 'MISSING_KEY') {
+        return `(System: [${provider.toUpperCase()} Config] API Key missing in environment variables. Add it to continue.)`;
+    }
+
     if (status === 429 || msg.includes("quota") || msg.includes("rate limit")) {
-        return `(System: [${provider.toUpperCase()} Quota] Daily limit reached. Deleting this message clears the flag.)`;
+        return `(System: [${provider.toUpperCase()} Quota] Daily limit reached. Deleting this message resets the state.)`;
     }
 
-    if (status === 401 || status === 403 || msg.includes("key")) {
-        return `(System: [${provider.toUpperCase()} Key] API Key is invalid or missing in env.)`;
+    if (status === 401 || status === 403) {
+        return `(System: [${provider.toUpperCase()} Auth] Invalid API key detected in environment.)`;
     }
 
-    // Temporary/Network Errors
-    return `(System: [${provider.toUpperCase()} Error] ${error.message || "Temporary failure. You can continue chatting."})`;
+    return `(System: [${provider.toUpperCase()} Error] ${error.message || "Request failed. You can still continue the conversation."})`;
 };
 
 // ------------------------------------------------------------------
@@ -166,18 +140,10 @@ export const generateBotResponse = async (
     onQuotaExceeded?: () => void
 ): Promise<string> => {
     
-    const providerId = getProviderForModel(modelId);
-    
-    // Switch Isolation: Detect if provider or its key has changed
-    const currentKey = providerId !== 'local' ? getEnvKey(providerId as any) : null;
-    if (providerId !== currentProviderId || (providerId !== 'local' && currentKey !== providerRegistry[providerId].keyHash)) {
-        currentProviderId = providerId;
-        resetApiState(providerId !== 'local' ? (providerId as any) : undefined);
-    }
+    const providerId = modelId === 'local-offline' ? 'local' : (modelId.startsWith('deepseek-') ? 'deepseek' : 'gemini');
 
     if (providerId === 'local') return processLocalResponse(history, bot);
 
-    const activeState = providerRegistry[providerId];
     const execute = async () => {
         if (providerId === 'gemini') return await runGeminiRequest(modelId, history, bot);
         return await runDeepSeekRequest(modelId, history, bot);
@@ -186,29 +152,29 @@ export const generateBotResponse = async (
     try {
         const result = await execute();
         onSuccess?.();
-        activeState.lastError = null;
         return result;
     } catch (error: any) {
-        // SINGLE-RETRY LOGIC
-        if (!activeState.retryActive && (error.status === 429 || error.status >= 500)) {
-            activeState.retryActive = true;
+        // SINGLE-RETRY LOGIC (ONLY for transient failures)
+        const isTransient = error.status === 429 || error.status >= 500;
+        const retryFlag = providerId === 'gemini' ? geminiRetryActive : deepseekRetryActive;
+
+        if (isTransient && !retryFlag) {
+            if (providerId === 'gemini') geminiRetryActive = true; else deepseekRetryActive = true;
             try {
                 const retryResult = await execute();
                 onSuccess?.();
-                activeState.retryActive = false;
-                activeState.lastError = null;
                 return retryResult;
             } catch (retryError: any) {
-                activeState.retryActive = false;
-                const errorMsg = parseAiError(retryError, providerId);
-                if (errorMsg.includes("Quota")) onQuotaExceeded?.();
-                return errorMsg;
+                if (String(retryError?.message).toLowerCase().includes("quota")) onQuotaExceeded?.();
+                return mapErrorToMessage(retryError, providerId);
+            } finally {
+                // Reset retry flag after the attempt so future messages aren't blocked
+                if (providerId === 'gemini') geminiRetryActive = false; else deepseekRetryActive = false;
             }
         }
         
-        const errorMsg = parseAiError(error, providerId);
-        if (errorMsg.includes("Quota")) onQuotaExceeded?.();
-        return errorMsg;
+        if (String(error?.message).toLowerCase().includes("quota")) onQuotaExceeded?.();
+        return mapErrorToMessage(error, providerId);
     }
 };
 
@@ -218,12 +184,10 @@ export const generateUserSuggestion = async (
     modelId: AIModelOption = 'gemini-3-flash-preview'
 ): Promise<string> => {
     try {
-        const providerId = getProviderForModel(modelId);
+        const providerId = modelId.startsWith('deepseek-') ? 'deepseek' : 'gemini';
         if (providerId !== 'gemini') return "Tell me more."; 
         
-        const key = getEnvKey('gemini');
-        if (!key) return "Hey, what's up?";
-        
+        const key = resolveKey('gemini');
         const ai = new GoogleGenAI({ apiKey: key });
         const contextText = history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n');
         
@@ -248,8 +212,7 @@ export const generateDynamicDescription = async (personality: string): Promise<s
 };
 
 export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
-    const key = getEnvKey('gemini');
-    if (!key) throw new Error("GEMINI_API_KEY missing.");
+    const key = resolveKey('gemini');
     const ai = new GoogleGenAI({ apiKey: key });
     const parts: any[] = [{ text: prompt }];
     if (sourceImage) {
@@ -267,8 +230,7 @@ export const generateImage = async (prompt: string, sourceImage?: string | null)
 };
 
 export const generateCodePrompt = async (task: string, language: string): Promise<string> => {
-    const key = getEnvKey('gemini');
-    if (!key) throw new Error("GEMINI_API_KEY missing.");
+    const key = resolveKey('gemini');
     const ai = new GoogleGenAI({ apiKey: key });
     const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',

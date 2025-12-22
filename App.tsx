@@ -14,6 +14,7 @@ import VersionPage from './components/VersionPage';
 import ApiVaultPage from './components/ApiVaultPage';
 import type { User, BotProfile, Persona, ChatMessage, AIModelOption, VoicePreference, ChatSession, CustomBlock, GeminiUsage, ApiKeyEntry } from './types';
 import { migrateData, loadUserData, saveUserData, clearUserData } from './services/storageService';
+import { resetApiState } from './services/geminiService';
 
 export type Page = 'home' | 'humans' | 'create' | 'personas' | 'chat' | 'story' | 'stats' | 'photo' | 'version' | 'vault';
 
@@ -262,7 +263,10 @@ const App: React.FC = () => {
   }, []);
 
   const handleSaveApiKey = useCallback((key: ApiKeyEntry) => {
-      // RESET QUOTA STATE when key is manually saved/changed
+      // HARD API STATE RESET (MANDATORY)
+      // Fresh keys never inherit exhausted state
+      resetApiState();
+      
       const today = new Date().toISOString().split('T')[0];
       setGeminiUsage(prev => {
           const newUsage = { ...prev };
@@ -301,6 +305,7 @@ const App: React.FC = () => {
       if (window.confirm("Clear all data?")) {
         await clearUserData();
         setBots([RASHMIKA_BOT]); setPersonas([]); setChatHistories({}); setBotUsage({}); setSessions([]); setCustomBlocks([]); setGeminiUsage({}); setBotReplyDelay(2); setApiKeys([]);
+        resetApiState();
       }
   }, []);
   
@@ -321,7 +326,7 @@ const App: React.FC = () => {
                 ...d, 
                 [modelId]: { 
                     count: isQuotaExceeded ? s.count : s.count + 1, 
-                    limitReached: isQuotaExceeded // Force sync with immediate API response
+                    limitReached: isQuotaExceeded
                 } 
             } 
         };
@@ -329,7 +334,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSelectAI = useCallback((model: AIModelOption) => {
-      // RESET limitReached flag when switching models to allow immediate retry with fresh logic/key context
+      // Identity isolation: purge old model's rate-limit flags locally
       const today = new Date().toISOString().split('T')[0];
       setGeminiUsage(prev => {
           const newUsage = { ...prev };
@@ -342,6 +347,7 @@ const App: React.FC = () => {
           return newUsage;
       });
       setSelectedAI(model);
+      resetApiState();
   }, []);
 
   const selectedBot = bots.find(b => b.id === selectedBotId);

@@ -29,6 +29,9 @@ const aiModelOptions: { id: AIModelOption, name: string, quotaLimit?: number, pr
     { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Smartest)', quotaLimit: 5, provider: 'Google' },
     { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)', provider: 'DeepSeek' },
     { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)', provider: 'DeepSeek' },
+    { id: 'llama-3.3-70b-versatile', name: 'LLaMA 3.3 70B (Versatile)', provider: 'Groq' },
+    { id: 'llama-3.1-8b-instant', name: 'LLaMA 3.1 8B (Instant)', provider: 'Groq' },
+    { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', provider: 'Groq' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', quotaLimit: 15, provider: 'Google' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', quotaLimit: 2, provider: 'Google' },
     { id: 'gemini-flash-latest', name: 'Gemini Flash (Legacy)', quotaLimit: 15, provider: 'Google' },
@@ -122,7 +125,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                     </button>
                     {isUsageExpanded && (
                         <div className="p-4 space-y-3 animate-fadeIn">
-                            <p className="text-[10px] text-gray-500 mb-2 italic">Estimates reset daily. Note: DeepSeek quota is managed on their platform.</p>
+                            <p className="text-[10px] text-gray-500 mb-2 italic">Estimates reset daily. Note: DeepSeek & Groq quotas are managed on their respective platforms.</p>
                             {aiModelOptions.filter(opt => opt.quotaLimit).map(model => {
                                 const stats = todayUsage[model.id] || { count: 0, limitReached: false };
                                 return (
@@ -228,7 +231,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
 
             <div className="mt-auto text-center text-xs text-gray-500 flex flex-col items-center gap-2 pt-4">
                 <img src="https://i.postimg.cc/qRB2Gnw2/Gemini-Generated-Image-vfkohrvfkohrvfko-1.png" alt="Zia.ai Logo" className="h-8 w-8"/>
-                <p>© 2025 Zia.ai — Gemini & DeepSeek Integration</p>
+                <p>© 2025 Zia.ai — Multi-Provider AI Integration</p>
             </div>
         </div>
       </div>

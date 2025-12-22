@@ -1,5 +1,5 @@
 
-export type AIProvider = 'gemini' | 'deepseek' | 'local';
+export type AIProvider = 'gemini' | 'deepseek' | 'groq' | 'local';
 
 export type AIModelOption = 
   | 'gemini-3-flash-preview'
@@ -10,6 +10,9 @@ export type AIModelOption =
   | 'gemini-flash-lite-latest' 
   | 'deepseek-chat'
   | 'deepseek-reasoner'
+  | 'llama-3.3-70b-versatile'
+  | 'llama-3.1-8b-instant'
+  | 'mixtral-8x7b-32768'
   | 'local-offline';
 
 export type VoicePreference = string;

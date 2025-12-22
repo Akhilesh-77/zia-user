@@ -5,30 +5,31 @@ import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🛡️ API STATE REGISTRY (HARD RESET CAPABLE)
+// 🛡️ ISOLATED API REGISTRY (CRASH-SAFE)
 // ------------------------------------------------------------------
-// In-memory cache for tracking "true" quota exhaustion verified by the API
 let verifiedQuotaExhaustion: Record<string, boolean> = {};
 let lastUsedApiKey: string | null = null;
+let lastErrorString: string | null = null;
 
 /**
  * HARD API STATE RESET (MANDATORY)
- * Fully destroys in-memory state when identity changes.
+ * Fully destroys all in-memory flags, caches, and error registries.
+ * Ensures fresh keys never inherit exhausted state.
  */
 export const resetApiState = () => {
   verifiedQuotaExhaustion = {};
+  lastErrorString = null;
   lastUsedApiKey = process.env.API_KEY || null;
-  console.log("Zia.ai: Hard API State Reset executed. All quota and error flags purged.");
+  console.log("Zia.ai: Hard API State Reset. Isolated execution context cleared.");
 };
 
 /**
- * API ENDPOINT ISOLATION (MANDATORY)
- * Creates a fresh, isolated client instance.
+ * API ENDPOINT ISOLATION
+ * Detects identity changes and forces a fresh client instance.
  */
 const getIsolatedGeminiClient = () => {
   const currentKey = process.env.API_KEY;
   
-  // Detect Identity Change
   if (currentKey !== lastUsedApiKey) {
     resetApiState();
   }
@@ -44,7 +45,8 @@ const isExplicitQuotaExhaustion = (error: any): boolean => {
     const msg = String(error?.message || "").toLowerCase();
     const status = error?.status || error?.error?.status;
     
-    // ONLY confirm if the API explicitly says so via status 429 or clear quota metadata
+    // STRICT: Only confirm if 429 is returned or specific quota metadata is present.
+    // Prevents timeouts/network errors from being misclassified as quota limits.
     return (
         status === 429 || 
         msg.includes("quota exceeded") || 
@@ -57,20 +59,26 @@ const mapErrorToMessage = (error: any): string => {
     const msg = String(error?.message || error?.error?.message || error || "").toLowerCase();
     const isQuota = isExplicitQuotaExhaustion(error);
     
+    let responseText = "";
+
     if (isQuota) {
-        return "(System: [Quota] Daily limit reached. Please check your API usage in Google AI Studio or use a different key from the Vault.)";
+        responseText = "(System: [Quota] Daily limit reached. Use a different key or wait for reset.)";
+    } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed to fetch")) {
+        responseText = "(System: [Network] Connection error. Please try again.)";
+    } else if (msg.includes("timeout") || msg.includes("deadline")) {
+        responseText = "(System: [Timeout] AI took too long. Try a shorter message.)";
+    } else {
+        responseText = `(System: [Error] ${msg || "An unexpected error occurred."})`;
     }
 
-    // Classify all other errors as temporary/network
-    if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed to fetch")) {
-        return "(System: [Network] Connection error. Please check your internet connection.)";
+    // API ERROR LOOP BREAKER
+    // If same error repeats, suppress the duplicate to prevent spam.
+    if (responseText === lastErrorString) {
+        return "(System: [Status] Still experiencing issues. Check your settings or change models.)";
     }
     
-    if (msg.includes("timeout") || msg.includes("deadline")) {
-        return "(System: [Timeout] The request took too long. This is temporary—please try again.)";
-    }
-
-    return `(System: [Temporary Error] ${msg || "An unexpected issue occurred. You can continue typing."})`;
+    lastErrorString = responseText;
+    return responseText;
 };
 
 // ------------------------------------------------------------------
@@ -124,22 +132,19 @@ export const generateBotResponse = async (
     };
 
     try {
-        // First Attempt
         const result = await runRequest();
         onSuccess?.();
+        lastErrorString = null; // Clear error loop on success
         return result;
     } catch (error: any) {
-        // SINGLE-RETRY VERIFICATION LOGIC (MANDATORY)
+        // SINGLE-RETRY VERIFICATION LOGIC
         if (isExplicitQuotaExhaustion(error)) {
-            console.warn("Zia.ai: Quota hit detected. Triggering Single-Retry Verification...");
             try {
-                // Retry once with a clean request
                 const retryResult = await runRequest();
-                console.log("Zia.ai: Retry successful. Quota error suppressed.");
                 onSuccess?.();
+                lastErrorString = null;
                 return retryResult;
             } catch (retryError: any) {
-                // If retry fails with confirmed quota metadata -> then show limit error
                 if (isExplicitQuotaExhaustion(retryError)) {
                     verifiedQuotaExhaustion[modelId] = true;
                     onQuotaExceeded?.();
@@ -148,8 +153,6 @@ export const generateBotResponse = async (
                 return mapErrorToMessage(retryError);
             }
         }
-        
-        // Handle non-quota errors normally
         return mapErrorToMessage(error);
     }
 };

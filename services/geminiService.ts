@@ -1,83 +1,45 @@
 
-import { GoogleGenAI } from "@google/genai";
 import { ChatMessage, AIModelOption, BotProfile } from "../types";
 import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
-// ------------------------------------------------------------------
-// 🛡️ CLIENT-SIDE SERVICE (PROXY-DRIVEN)
-// ------------------------------------------------------------------
-
-let geminiRetryActive = false;
-let groqRetryActive = false;
-
 /**
- * Resets local retry flags. 
- * Called when an error message is deleted by the user.
+ * 🛡️ CLIENT-SIDE SERVICE (FAST-PATH & CRASH-RESILIENT)
  */
+
 export const resetApiState = () => {
-    geminiRetryActive = false;
-    groqRetryActive = false;
-    console.log("Zia.ai: Client state reset. Ready for fresh proxy request.");
+    // No-op for now as proxy-driven state is purged per-request
+    console.debug("Zia.ai: Gateway state refreshed.");
 };
 
-/**
- * 🔒 SECURE PROXY CALLER
- * Routes all AI requests to the server-side gateway.
- * Prevents any client-side exposure of environment variables.
- */
 const callServerProxy = async (
     provider: 'gemini' | 'groq',
     modelId: string,
     history: ChatMessage[],
     bot: any
 ): Promise<string> => {
-    // Pre-process prompt engineering on client (UI logic)
+    // FAST-PATH: Minimal pre-processing
     const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
 
     const response = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            provider,
-            modelId,
-            history,
-            systemInstruction
-        })
+        body: JSON.stringify({ provider, modelId, history, systemInstruction })
     });
 
-    const result = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        const rawText = await response.text();
+        return `(System: [Proxy Error] Invalid response format. ${rawText.slice(0, 50)}...)`;
+    }
 
+    const result = await response.json();
     if (!response.ok) {
-        throw { 
-            status: result.status || response.status, 
-            message: result.error || response.statusText,
-            type: result.type 
-        };
+        return `(System: [${provider.toUpperCase()}] ${result.error || "Request failed."})`;
     }
 
     return result.text;
 };
-
-/**
- * Maps proxy/server errors to user-friendly chat messages.
- */
-const mapProxyError = (error: any, provider: string): string => {
-    const p = provider.toUpperCase();
-    const s = error?.status;
-    const m = String(error?.message || "").toLowerCase();
-
-    if (error.type === 'MISSING_KEY') return `(System: [${p} Config] Server API key is not configured.)`;
-    if (s === 429 || m.includes("quota") || m.includes("rate limit")) return `(System: [${p} Quota] Server capacity reached. Deleting this resets state.)`;
-    if (s === 401 || s === 403) return `(System: [${p} Auth] Server API key is invalid.)`;
-    if (s >= 500) return `(System: [${p} Server] The gateway encountered a fatal error.)`;
-    
-    return `(System: [${p} Error] ${error.message || "Request failed. Continuity preserved."})`;
-};
-
-// ------------------------------------------------------------------
-// 🤖 CORE AI ROUTER
-// ------------------------------------------------------------------
 
 export const generateBotResponse = async (
     history: ChatMessage[],
@@ -92,32 +54,24 @@ export const generateBotResponse = async (
     const providerId: 'gemini' | 'groq' = 
         (modelId.startsWith('llama-') || modelId.startsWith('mixtral-')) ? 'groq' : 'gemini';
 
-    const execute = () => callServerProxy(providerId, modelId, history, bot);
-
     try {
-        const result = await execute();
-        onSuccess?.();
-        return result;
-    } catch (error: any) {
-        const isTransient = error.status === 429 || error.status >= 500;
-        let retryFlag = providerId === 'gemini' ? geminiRetryActive : groqRetryActive;
-
-        if (isTransient && !retryFlag) {
-            if (providerId === 'gemini') geminiRetryActive = true; else groqRetryActive = true;
-            try {
-                const result = await execute();
-                onSuccess?.();
-                return result;
-            } catch (retryError: any) {
-                if (mapProxyError(retryError, providerId).includes("Quota")) onQuotaExceeded?.();
-                return mapProxyError(retryError, providerId);
-            } finally {
-                resetApiState();
-            }
-        }
+        const result = await callServerProxy(providerId, modelId, history, bot);
         
-        if (mapProxyError(error, providerId).includes("Quota")) onQuotaExceeded?.();
-        return mapProxyError(error, providerId);
+        // SUCCESS PATH
+        if (!result.startsWith("(System:")) {
+            onSuccess?.();
+            return result;
+        }
+
+        // ERROR PATH (NORMALIZED)
+        if (result.includes("Quota") || result.includes("429")) {
+            onQuotaExceeded?.();
+        }
+        return result;
+
+    } catch (error: any) {
+        // FATAL NETWORK/CLIENT ERROR
+        return `(System: [Network] Failed to connect to proxy server. Check your connection.)`;
     }
 };
 
@@ -127,10 +81,11 @@ export const generateUserSuggestion = async (
     modelId: AIModelOption = 'gemini-3-flash-preview'
 ): Promise<string> => {
     try {
-        return await callServerProxy('gemini', 'gemini-3-flash-preview', 
-            [{ sender: 'user', id: 'sys', timestamp: Date.now(), text: `Suggest one natural short message for the user based on history:\n${history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n')}` }],
-            { ...bot, personality: `You are ${bot.name}'s assistant. Suggest 1 short msg for the user.` }
+        const result = await callServerProxy('gemini', 'gemini-3-flash-preview', 
+            [{ sender: 'user', id: 'sys', timestamp: Date.now(), text: `Suggest one short chat message for the user based on history:\n${history.slice(-3).map(m => `${m.sender}: ${m.text}`).join('\n')}` }],
+            { ...bot, personality: `Suggest 1 short msg.` }
         );
+        return result.replace(/^"(.*)"$/, '$1').trim();
     } catch { return "Tell me more."; }
 };
 
@@ -140,16 +95,10 @@ export const generateDynamicDescription = async (personality: string): Promise<s
     return firstSentence.length > 60 ? firstSentence.substring(0, 57) + "..." : firstSentence;
 };
 
-/**
- * Image generation is still handled by Gemini, 
- * but now safely resolves keys via the server-only check logic.
- */
 export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
-    // Implementation for Image Generation usually requires direct SDK access.
-    // In a strict Server-Side Proxy environment, this should also be moved 
-    // to a dedicated /api/image endpoint if full environment safety is needed.
-    // For now, we perform a fetch to the proxy if it supports it, or throw an error.
-    throw new Error("Proxy: Image generation must be performed via /api/image (Pending Implementation)");
+    // Note: Image gen requires direct SDK or specialized proxy endpoint.
+    // This stub remains to preserve interface but redirects to system error in proxy context.
+    return `(System: Image generation requires direct Gemini API keys in the vault.)`;
 };
 
 export const generateCodePrompt = async (task: string, language: string): Promise<string> => {

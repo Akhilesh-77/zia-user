@@ -2,75 +2,68 @@
 import { GoogleGenAI } from "@google/genai";
 
 /**
- * 🛡️ SERVER-SIDE AI PROXY GATEWAY
- * This file runs in the server runtime (Vercel).
- * It is the ONLY place where API keys are accessed.
+ * 🛡️ SERVER-SIDE AI PROXY GATEWAY (FAST-PATH)
  */
 
 export const config = {
   runtime: 'nodejs',
 };
 
-/**
- * Helper to fetch with timeout and single retry logic
- */
-async function safeFetch(url: string, options: any, timeoutMs: number = 25000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+const REQUEST_TIMEOUT = 20000; // 20 Seconds Hard Limit
 
+async function fetchWithTimeout(url: string, options: any, timeout: number) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
+    const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(id);
     return response;
-  } catch (err: any) {
+  } catch (err) {
     clearTimeout(id);
     throw err;
   }
 }
 
 export default async function handler(req: Request) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
-  }
+  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
   try {
-    const body = await req.json();
-    const { provider, modelId, history, systemInstruction } = body;
+    const { provider, modelId, history, systemInstruction } = await req.json();
 
-    // 1. Server-Only Environment Access
+    // 1. FAST-PATH: Immediate key resolution
     const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY;
     const GROQ_KEY = process.env.GROQ_API_KEY;
 
-    // 2. Provider Routing & Execution
+    // 2. PROVIDER ROUTING (LAZY & ISOLATED)
     if (provider === 'gemini') {
-      if (!GEMINI_KEY) {
-        return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured on server.', type: 'MISSING_KEY' }), { status: 401 });
-      }
-
+      if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY_MISSING');
+      
       const ai = new GoogleGenAI({ apiKey: GEMINI_KEY });
       const contents = history.map((m: any) => ({
         role: m.sender === 'user' ? 'user' : 'model',
         parts: [{ text: m.text || " " }]
       }));
 
-      const response = await ai.models.generateContent({
-        model: modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview',
-        contents,
-        config: { systemInstruction, temperature: 0.9 }
-      });
+      // Gemini SDK doesn't have a direct timeout, so we wrap the promise
+      const response = await Promise.race([
+        ai.models.generateContent({
+          model: modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview',
+          contents,
+          config: { systemInstruction, temperature: 0.9 }
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), REQUEST_TIMEOUT))
+      ]) as any;
 
-      return new Response(JSON.stringify({ text: response.text || "(Silence...)" }), { status: 200 });
+      return new Response(JSON.stringify({ text: response.text || "(Silence...)" }), { 
+        status: 200, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
     }
 
     if (provider === 'groq') {
-      if (!GROQ_KEY) {
-        return new Response(JSON.stringify({ error: 'GROQ_API_KEY not configured on server.', type: 'MISSING_KEY' }), { status: 401 });
-      }
+      if (!GROQ_KEY) throw new Error('GROQ_API_KEY_MISSING');
 
-      const fetchOptions = {
+      const response = await fetchWithTimeout("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -87,72 +80,42 @@ export default async function handler(req: Request) {
           ],
           temperature: 0.9
         })
-      };
-
-      let response;
-      let attempts = 0;
-      const maxAttempts = 2; // Initial + 1 Retry
-
-      while (attempts < maxAttempts) {
-        attempts++;
-        try {
-          response = await safeFetch("https://api.groq.com/openai/v1/chat/completions", fetchOptions, 25000);
-          
-          // Check if it's a transient server error (5xx) to decide on retry
-          if (response.status >= 500 && attempts < maxAttempts) {
-            continue; 
-          }
-          break;
-        } catch (err: any) {
-          if (attempts >= maxAttempts) {
-            const isTimeout = err.name === 'AbortError';
-            return new Response(JSON.stringify({ 
-                error: isTimeout ? 'Request timed out (25s). Groq is taking too long.' : 'Network error connecting to Groq.',
-                status: isTimeout ? 408 : 503 
-            }), { status: isTimeout ? 408 : 503 });
-          }
-          // Small delay before retry
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
-      if (!response) {
-         return new Response(JSON.stringify({ error: 'Failed to get response from Groq.' }), { status: 500 });
-      }
+      }, REQUEST_TIMEOUT);
 
       const contentType = response.headers.get('content-type') || '';
-      
       if (!contentType.includes('application/json')) {
-        const textError = await response.text();
-        return new Response(JSON.stringify({ 
-            error: `Groq returned non-JSON response: ${textError.substring(0, 100)}...`,
-            status: response.status 
-        }), { status: response.status });
+        const text = await response.text();
+        return new Response(JSON.stringify({ error: `Provider error: ${text.slice(0, 100)}` }), { status: response.status });
       }
 
-      const data = await response.json().catch(() => null);
-      if (!data) {
-          return new Response(JSON.stringify({ error: 'Failed to parse Groq JSON response.' }), { status: 500 });
-      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error?.message || 'Groq API error');
 
-      if (!response.ok) {
-        return new Response(JSON.stringify({ 
-            error: data?.error?.message || response.statusText,
-            status: response.status 
-        }), { status: response.status });
-      }
-
-      return new Response(JSON.stringify({ text: data.choices?.[0]?.message?.content || "(Silence...)" }), { status: 200 });
+      return new Response(JSON.stringify({ text: data.choices?.[0]?.message?.content || "(Silence...)" }), { 
+        status: 200, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
     }
 
     return new Response(JSON.stringify({ error: 'Unsupported provider' }), { status: 400 });
 
   } catch (err: any) {
-    // 5. Full Error Handling at Server Level - NEVER CRASH
-    console.error("Server Proxy Critical Failure:", err);
-    return new Response(JSON.stringify({ 
-      error: err.message || 'Internal Server Error during AI processing.',
-      type: 'SERVER_CRASH'
-    }), { status: 500 });
+    let message = "An unexpected error occurred.";
+    let status = 500;
+
+    if (err.name === 'AbortError' || err.message === 'TIMEOUT') {
+      message = "Request timed out (20s). Try again.";
+      status = 408;
+    } else if (err.message === 'GEMINI_API_KEY_MISSING' || err.message === 'GROQ_API_KEY_MISSING') {
+      message = "API key missing on server.";
+      status = 401;
+    } else {
+      message = err.message || "Provider communication failed.";
+    }
+
+    return new Response(JSON.stringify({ error: message }), { 
+      status, 
+      headers: { 'Content-Type': 'application/json' } 
+    });
   }
 }

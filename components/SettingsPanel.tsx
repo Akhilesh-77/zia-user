@@ -92,7 +92,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
     onNavigate('version');
   }
 
-  const groupedOptions = useMemo(() => {
+  // Added explicit return type Record<string, typeof aiModelOptions> to ensure TypeScript correctly identifies 'options' as an array in the render phase
+  const groupedOptions = useMemo<Record<string, typeof aiModelOptions>>(() => {
       const groups: Record<string, typeof aiModelOptions> = {};
       aiModelOptions.forEach(opt => {
           if (!groups[opt.provider]) groups[opt.provider] = [];

@@ -5,7 +5,7 @@ import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🛡️ TRANSIENT PROVIDER STATE (CRASH-SAFE)
+// 🛡️ TRANSIENT PROVIDER STATE (CRASH-SAFE & ISOLATED)
 // ------------------------------------------------------------------
 let geminiRetryActive = false;
 let deepseekRetryActive = false;
@@ -25,17 +25,25 @@ export const resetApiState = () => {
 
 /**
  * LAZY ENV KEY RESOLUTION (MANDATORY)
- * Resolves keys dynamically at request time. Never cached in memory.
+ * Resolves keys dynamically at request time. 
+ * Includes critical runtime diagnostics to distinguish between 
+ * missing keys and inaccessible environments.
  */
-const resolveKey = (provider: 'gemini' | 'deepseek' | 'groq'): string | null => {
+const resolveKey = (provider: 'gemini' | 'deepseek' | 'groq'): { key: string | null; error?: string; errorType?: string } => {
     try {
-        const env =
-            typeof process !== 'undefined' && process.env
-                ? (process.env as any)
-                : null;
+        // Diagnostic: Check if process.env is even accessible in the current runtime
+        const isProcessDefined = typeof process !== 'undefined';
+        const isEnvAccessible = isProcessDefined && !!process.env;
 
-        if (!env) return null;
+        if (!isEnvAccessible) {
+            return { 
+                key: null, 
+                error: `[Runtime Failure] Environment variables are inaccessible in this execution context.`,
+                errorType: 'RUNTIME_ERROR'
+            };
+        }
 
+        const env = process.env as any;
         const key =
             provider === 'gemini'
                 ? env.GEMINI_API_KEY || env.API_KEY
@@ -43,13 +51,21 @@ const resolveKey = (provider: 'gemini' | 'deepseek' | 'groq'): string | null => 
                 ? env.DEEPSEEK_API_KEY
                 : env.GROQ_API_KEY;
 
-        if (typeof key !== 'string' || key.trim().length < 5) {
-            return null; // soft fail
+        if (!key || typeof key !== 'string' || key.trim().length < 5) {
+            return { 
+                key: null, 
+                error: `${provider.toUpperCase()}_API_KEY not found in environment.`,
+                errorType: 'MISSING_KEY'
+            };
         }
 
-        return key.trim();
-    } catch {
-        return null;
+        return { key: key.trim() };
+    } catch (e) {
+        return { 
+            key: null, 
+            error: `[Critical] Fatal error during environment key resolution.`,
+            errorType: 'RESOLUTION_CRASH'
+        };
     }
 };
 
@@ -58,8 +74,10 @@ const resolveKey = (provider: 'gemini' | 'deepseek' | 'groq'): string | null => 
 // ------------------------------------------------------------------
 
 const runGroqRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = resolveKey('groq');
-    if (!key) throw { status: 'MISSING_KEY', message: 'GROQ_API_KEY not available.' };
+    const resolution = resolveKey('groq');
+    if (!resolution.key) {
+        throw { status: resolution.errorType, message: resolution.error };
+    }
 
     const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
 
@@ -67,7 +85,7 @@ const runGroqRequest = async (modelId: string, history: ChatMessage[], bot: any)
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${key}`
+            "Authorization": `Bearer ${resolution.key}`
         },
         body: JSON.stringify({
             model: modelId,
@@ -87,6 +105,8 @@ const runGroqRequest = async (modelId: string, history: ChatMessage[], bot: any)
         const errData = await response.json().catch(() => ({}));
         const error: any = new Error(errData?.error?.message || response.statusText);
         error.status = response.status;
+        error.errorType = errData?.error?.type || 'API_ERROR';
+        error.provider = 'groq';
         throw error;
     }
 
@@ -95,8 +115,10 @@ const runGroqRequest = async (modelId: string, history: ChatMessage[], bot: any)
 };
 
 const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = resolveKey('deepseek');
-    if (!key) throw { status: 'MISSING_KEY', message: 'DeepSeek API key not available.' };
+    const resolution = resolveKey('deepseek');
+    if (!resolution.key) {
+        throw { status: resolution.errorType, message: resolution.error };
+    }
 
     const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
 
@@ -104,7 +126,7 @@ const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: 
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${key}`
+            "Authorization": `Bearer ${resolution.key}`
         },
         body: JSON.stringify({
             model: modelId,
@@ -132,10 +154,12 @@ const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: 
 };
 
 const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const key = resolveKey('gemini');
-    if (!key) throw { status: 'MISSING_KEY', message: 'Gemini API key not available.' };
+    const resolution = resolveKey('gemini');
+    if (!resolution.key) {
+        throw { status: resolution.errorType, message: resolution.error };
+    }
     
-    const ai = new GoogleGenAI({ apiKey: key });
+    const ai = new GoogleGenAI({ apiKey: resolution.key });
     const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
     const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
 
@@ -154,22 +178,49 @@ const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: an
 };
 
 // ------------------------------------------------------------------
-// 🔍 ERROR NORMALIZATION
+// 🔍 EXHAUSTIVE ERROR CLASSIFICATION
 // ------------------------------------------------------------------
 const mapErrorToMessage = (error: any, provider: string): string => {
     const status = error?.status;
     const msg = String(error?.message || "").toLowerCase();
+    const type = error?.errorType || '';
+    const pName = provider.toUpperCase();
 
+    // 1. Diagnostics & Runtime Failures
+    if (status === 'RUNTIME_ERROR') {
+        return `(System: [${pName} Environment] Runtime Failure - Environment variables are inaccessible in this context.)`;
+    }
     if (status === 'MISSING_KEY') {
-        return `(System: [${provider.toUpperCase()} Config] API Key missing in environment variables.)`;
+        return `(System: [${pName} Config] ${pName}_API_KEY not found in environment.)`;
     }
-    if (status === 429 || msg.includes("quota") || msg.includes("rate limit")) {
-        return `(System: [${provider.toUpperCase()} Quota] Limit reached. Deleting this bubble resets the provider.)`;
+    if (status === 'RESOLUTION_CRASH') {
+        return `(System: [${pName} Fatal] Encountered a crash while resolving the provider identity.)`;
     }
-    if (status === 401 || status === 403) {
-        return `(System: [${provider.toUpperCase()} Auth] Invalid API key in env.)`;
+
+    // 2. Authentication Failures
+    if (status === 401 || status === 403 || type === 'authentication_error') {
+        return `(System: [${pName} Auth] The API key in your environment is invalid or has been revoked.)`;
     }
-    return `(System: [${provider.toUpperCase()} Error] ${error.message || "Request failed. continuity preserved."})`;
+
+    // 3. Quota & Rate Limits
+    if (status === 429 || type === 'rate_limit_reached' || msg.includes("quota") || msg.includes("rate limit")) {
+        return `(System: [${pName} Quota] Capacity reached. Deleting this message clears the provider state.)`;
+    }
+
+    // 4. Server & Model Failures
+    if (status >= 500) {
+        return `(System: [${pName} Server] The AI service is currently overloaded or experiencing downtime.)`;
+    }
+    if (msg.includes("not found") || msg.includes("invalid model")) {
+        return `(System: [${pName} Model] The selected model is not available for this key.)`;
+    }
+
+    // 5. Network & Unknown
+    if (msg.includes("fetch") || msg.includes("network")) {
+        return `(System: [${pName} Network] Connection failed. Check your internet or proxy settings.)`;
+    }
+
+    return `(System: [${pName} Error] ${error.message || "An unexpected error occurred. Continuity is preserved."})`;
 };
 
 // ------------------------------------------------------------------
@@ -201,6 +252,7 @@ export const generateBotResponse = async (
         onSuccess?.();
         return result;
     } catch (error: any) {
+        // Transient failures logic (429, 5xx)
         const isTransient = error.status === 429 || error.status >= 500;
         let retryFlag = false;
         if (providerId === 'gemini') retryFlag = geminiRetryActive;
@@ -237,9 +289,9 @@ export const generateUserSuggestion = async (
     modelId: AIModelOption = 'gemini-3-flash-preview'
 ): Promise<string> => {
     try {
-        const key = resolveKey('gemini');
-        if (!key) return "Tell me more.";
-        const ai = new GoogleGenAI({ apiKey: key });
+        const resolution = resolveKey('gemini');
+        if (!resolution.key) return "Tell me more.";
+        const ai = new GoogleGenAI({ apiKey: resolution.key });
         const contextText = history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n');
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
@@ -260,9 +312,9 @@ export const generateDynamicDescription = async (personality: string): Promise<s
 };
 
 export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
-    const key = resolveKey('gemini');
-    if (!key) throw new Error("GEMINI_API_KEY missing.");
-    const ai = new GoogleGenAI({ apiKey: key });
+    const resolution = resolveKey('gemini');
+    if (!resolution.key) throw new Error("GEMINI_API_KEY missing.");
+    const ai = new GoogleGenAI({ apiKey: resolution.key });
     const parts: any[] = [{ text: prompt }];
     if (sourceImage) {
         const [mimeInfo, base64Data] = sourceImage.split(',');
@@ -279,9 +331,9 @@ export const generateImage = async (prompt: string, sourceImage?: string | null)
 };
 
 export const generateCodePrompt = async (task: string, language: string): Promise<string> => {
-    const key = resolveKey('gemini');
-    if (!key) throw new Error("GEMINI_API_KEY missing.");
-    const ai = new GoogleGenAI({ apiKey: key });
+    const resolution = resolveKey('gemini');
+    if (!resolution.key) throw new Error("GEMINI_API_KEY missing.");
+    const ai = new GoogleGenAI({ apiKey: resolution.key });
     const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: `Create prompt for ${task} in ${language}.`

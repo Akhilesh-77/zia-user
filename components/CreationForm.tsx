@@ -90,7 +90,8 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'photo' | 'gif' | 'background' | 'gallery' | 'video') => {
     if (e.target.files) {
       if (fileType === 'gallery') {
-         Array.from(e.target.files).forEach(file => {
+         // Added explicit type annotation (file: File) to avoid unknown type errors in readAsDataURL
+         Array.from(e.target.files).forEach((file: File) => {
              const reader = new FileReader();
              reader.onload = (event) => {
                  const result = event.target?.result as string;
@@ -100,7 +101,8 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
              reader.readAsDataURL(file);
          });
       } else if (fileType === 'video') {
-         Array.from(e.target.files).forEach(file => {
+         // Added explicit type annotation (file: File) to avoid unknown type errors in readAsDataURL
+         Array.from(e.target.files).forEach((file: File) => {
              const reader = new FileReader();
              reader.onload = (event) => {
                  const result = event.target?.result as string;

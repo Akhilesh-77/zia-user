@@ -11,6 +11,26 @@ export const config = {
   runtime: 'nodejs',
 };
 
+/**
+ * Helper to fetch with timeout and single retry logic
+ */
+async function safeFetch(url: string, options: any, timeoutMs: number = 25000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (err: any) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 export default async function handler(req: Request) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
@@ -50,7 +70,7 @@ export default async function handler(req: Request) {
         return new Response(JSON.stringify({ error: 'GROQ_API_KEY not configured on server.', type: 'MISSING_KEY' }), { status: 401 });
       }
 
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const fetchOptions = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -67,25 +87,69 @@ export default async function handler(req: Request) {
           ],
           temperature: 0.9
         })
-      });
+      };
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
+      let response;
+      let attempts = 0;
+      const maxAttempts = 2; // Initial + 1 Retry
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        try {
+          response = await safeFetch("https://api.groq.com/openai/v1/chat/completions", fetchOptions, 25000);
+          
+          // Check if it's a transient server error (5xx) to decide on retry
+          if (response.status >= 500 && attempts < maxAttempts) {
+            continue; 
+          }
+          break;
+        } catch (err: any) {
+          if (attempts >= maxAttempts) {
+            const isTimeout = err.name === 'AbortError';
+            return new Response(JSON.stringify({ 
+                error: isTimeout ? 'Request timed out (25s). Groq is taking too long.' : 'Network error connecting to Groq.',
+                status: isTimeout ? 408 : 503 
+            }), { status: isTimeout ? 408 : 503 });
+          }
+          // Small delay before retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      if (!response) {
+         return new Response(JSON.stringify({ error: 'Failed to get response from Groq.' }), { status: 500 });
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (!contentType.includes('application/json')) {
+        const textError = await response.text();
         return new Response(JSON.stringify({ 
-            error: errData?.error?.message || response.statusText,
+            error: `Groq returned non-JSON response: ${textError.substring(0, 100)}...`,
             status: response.status 
         }), { status: response.status });
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (!data) {
+          return new Response(JSON.stringify({ error: 'Failed to parse Groq JSON response.' }), { status: 500 });
+      }
+
+      if (!response.ok) {
+        return new Response(JSON.stringify({ 
+            error: data?.error?.message || response.statusText,
+            status: response.status 
+        }), { status: response.status });
+      }
+
       return new Response(JSON.stringify({ text: data.choices?.[0]?.message?.content || "(Silence...)" }), { status: 200 });
     }
 
     return new Response(JSON.stringify({ error: 'Unsupported provider' }), { status: 400 });
 
   } catch (err: any) {
-    // 5. Full Error Handling at Server Level
-    console.error("Server Proxy Error:", err);
+    // 5. Full Error Handling at Server Level - NEVER CRASH
+    console.error("Server Proxy Critical Failure:", err);
     return new Response(JSON.stringify({ 
       error: err.message || 'Internal Server Error during AI processing.',
       type: 'SERVER_CRASH'

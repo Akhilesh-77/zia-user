@@ -5,227 +5,140 @@ import { xyz } from "./xyz";
 import { processLocalResponse } from "./localBrain";
 
 // ------------------------------------------------------------------
-// 🛡️ TRANSIENT PROVIDER STATE (CRASH-SAFE & ISOLATED)
+// 🛡️ SERVER-SIDE PROXY GATEWAY (ISOLATED EXECUTION)
 // ------------------------------------------------------------------
-let geminiRetryActive = false;
-let deepseekRetryActive = false;
-let groqRetryActive = false;
 
 /**
- * HARD PROVIDER STATE RESET
- * Fully destroys all transient flags and error trackers.
- * Guaranteed to be called on error deletion or provider switch.
+ * Transient state flags for the "Server" layer.
+ * These are reset on every request to prevent stale error persistence.
  */
+let geminiRetryFlag = false;
+let groqRetryFlag = false;
+let deepseekRetryFlag = false;
+
 export const resetApiState = () => {
-  geminiRetryActive = false;
-  deepseekRetryActive = false;
-  groqRetryActive = false;
-  console.log("Zia.ai: Hard Provider State Reset executed. All transient flags purged.");
+    geminiRetryFlag = false;
+    groqRetryFlag = false;
+    deepseekRetryFlag = false;
+    console.log("Zia.ai Proxy: Gateway state purged. Ready for fresh execution.");
 };
 
 /**
- * LAZY ENV KEY RESOLUTION (MANDATORY)
- * Resolves keys dynamically at request time. 
- * Includes critical runtime diagnostics to distinguish between 
- * missing keys and inaccessible environments.
+ * Internal "Server" logic for resolving keys.
+ * Client/Public code never touches this directly.
  */
-const resolveKey = (provider: 'gemini' | 'deepseek' | 'groq'): { key: string | null; error?: string; errorType?: string } => {
+const serverOnlyResolveKey = (provider: 'gemini' | 'deepseek' | 'groq') => {
+    const isProcessDefined = typeof process !== 'undefined';
+    const isEnvAccessible = isProcessDefined && !!process.env;
+
+    if (!isEnvAccessible) {
+        return { error: `[Runtime] Env vars inaccessible in this context.`, type: 'ENV_BLOCKED' };
+    }
+
+    const env = process.env as any;
+    const key = provider === 'gemini' ? (env.GEMINI_API_KEY || env.API_KEY) 
+              : provider === 'deepseek' ? env.DEEPSEEK_API_KEY 
+              : env.GROQ_API_KEY;
+
+    if (!key || typeof key !== 'string' || key.trim().length < 5) {
+        return { error: `${provider.toUpperCase()}_API_KEY is not configured on server.`, type: 'MISSING_KEY' };
+    }
+
+    return { key: key.trim() };
+};
+
+/**
+ * 🔒 THE PROXY GATEWAY
+ * Acts as the ONLY gateway to external APIs.
+ * This simulates a Server-Side Endpoint.
+ */
+const serverSideGateway = async (
+    provider: 'gemini' | 'deepseek' | 'groq',
+    modelId: string,
+    history: ChatMessage[],
+    bot: any
+): Promise<string> => {
+    // 1. Auth & Runtime Check
+    const auth = serverOnlyResolveKey(provider);
+    if (auth.error) {
+        throw { status: auth.type, message: auth.error };
+    }
+
+    // 2. Prepare Payload (Server Side)
+    const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
+
+    // 3. Provider Routing
     try {
-        // Diagnostic: Check if process.env is even accessible in the current runtime
-        const isProcessDefined = typeof process !== 'undefined';
-        const isEnvAccessible = isProcessDefined && !!process.env;
-
-        if (!isEnvAccessible) {
-            return { 
-                key: null, 
-                error: `[Runtime Failure] Environment variables are inaccessible in this execution context.`,
-                errorType: 'RUNTIME_ERROR'
-            };
+        if (provider === 'gemini') {
+            const ai = new GoogleGenAI({ apiKey: auth.key! });
+            const contents = history.map(m => ({
+                role: m.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: m.text || " " }]
+            }));
+            const response = await ai.models.generateContent({
+                model: modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview',
+                contents,
+                config: { systemInstruction, temperature: 0.9 }
+            });
+            return response.text || "(Silence...)";
         }
 
-        const env = process.env as any;
-        const key =
-            provider === 'gemini'
-                ? env.GEMINI_API_KEY || env.API_KEY
-                : provider === 'deepseek'
-                ? env.DEEPSEEK_API_KEY
-                : env.GROQ_API_KEY;
-
-        if (!key || typeof key !== 'string' || key.trim().length < 5) {
-            return { 
-                key: null, 
-                error: `${provider.toUpperCase()}_API_KEY not found in environment.`,
-                errorType: 'MISSING_KEY'
-            };
+        if (provider === 'groq') {
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${auth.key}` },
+                body: JSON.stringify({
+                    model: modelId,
+                    messages: [{ role: "system", content: systemInstruction }, ...history.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }))],
+                    temperature: 0.9
+                })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw { status: response.status, message: err?.error?.message || response.statusText };
+            }
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || "(Silence...)";
         }
 
-        return { key: key.trim() };
-    } catch (e) {
-        return { 
-            key: null, 
-            error: `[Critical] Fatal error during environment key resolution.`,
-            errorType: 'RESOLUTION_CRASH'
-        };
-    }
-};
+        if (provider === 'deepseek') {
+            const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${auth.key}` },
+                body: JSON.stringify({
+                    model: modelId,
+                    messages: [{ role: "system", content: systemInstruction }, ...history.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }))],
+                    temperature: 0.9
+                })
+            });
+            if (!response.ok) throw { status: response.status, message: response.statusText };
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || "(Silence...)";
+        }
 
-// ------------------------------------------------------------------
-// 🛠️ ISOLATED PROVIDER EXECUTIONS
-// ------------------------------------------------------------------
-
-const runGroqRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const resolution = resolveKey('groq');
-    if (!resolution.key) {
-        throw { status: resolution.errorType, message: resolution.error };
-    }
-
-    const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${resolution.key}`
-        },
-        body: JSON.stringify({
-            model: modelId,
-            messages: [
-                { role: "system", content: systemInstruction },
-                ...history.map(m => ({
-                    role: m.sender === 'user' ? 'user' : 'assistant',
-                    content: m.text || " "
-                }))
-            ],
-            temperature: 0.9,
-            stream: false
-        })
-    });
-
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const error: any = new Error(errData?.error?.message || response.statusText);
-        error.status = response.status;
-        error.errorType = errData?.error?.type || 'API_ERROR';
-        error.provider = 'groq';
+        throw new Error("Invalid Provider");
+    } catch (error: any) {
+        // Normalize errors for Client
         throw error;
     }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "(Silence...)";
 };
 
-const runDeepSeekRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const resolution = resolveKey('deepseek');
-    if (!resolution.key) {
-        throw { status: resolution.errorType, message: resolution.error };
-    }
+const mapGatewayError = (error: any, provider: string): string => {
+    const p = provider.toUpperCase();
+    const s = error?.status;
+    const m = String(error?.message || "").toLowerCase();
 
-    const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
-
-    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${resolution.key}`
-        },
-        body: JSON.stringify({
-            model: modelId,
-            messages: [
-                { role: "system", content: systemInstruction },
-                ...history.map(m => ({
-                    role: m.sender === 'user' ? 'user' : 'assistant',
-                    content: m.text || " "
-                }))
-            ],
-            temperature: 0.9,
-            stream: false
-        })
-    });
-
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const error: any = new Error(errData?.error?.message || response.statusText);
-        error.status = response.status;
-        throw error;
-    }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || "(Silence...)";
-};
-
-const runGeminiRequest = async (modelId: string, history: ChatMessage[], bot: any) => {
-    const resolution = resolveKey('gemini');
-    if (!resolution.key) {
-        throw { status: resolution.errorType, message: resolution.error };
-    }
-    
-    const ai = new GoogleGenAI({ apiKey: resolution.key });
-    const activeModel = modelId.startsWith('gemini-') ? modelId : 'gemini-3-flash-preview';
-    const systemInstruction = xyz(history, history[history.length - 1]?.text || "", bot.personality, bot.conversationMode, bot.gender);
-
-    const contents = history.map(m => ({
-        role: m.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: m.text || " " }]
-    }));
-
-    const response = await ai.models.generateContent({
-        model: activeModel,
-        contents,
-        config: { systemInstruction, temperature: 0.9 }
-    });
-
-    return response.text || "(Silence...)";
+    if (s === 'ENV_BLOCKED') return `(System: [${p} Runtime] Gateway failed to access environment. Use an environment that supports ENV access.)`;
+    if (s === 'MISSING_KEY') return `(System: [${p} Config] Server-side API key is missing. Ensure ${p}_API_KEY is set.)`;
+    if (s === 429 || m.includes("quota") || m.includes("rate limit")) return `(System: [${p} Quota] Server limit reached. Delete this message to reset.)`;
+    if (s === 401 || s === 403) return `(System: [${p} Auth] Server-side key is invalid or expired.)`;
+    return `(System: [${p} Proxy Error] ${error.message || "Request failed but continuity is preserved."})`;
 };
 
 // ------------------------------------------------------------------
-// 🔍 EXHAUSTIVE ERROR CLASSIFICATION
+// 🤖 CLIENT INTERFACE (PUBLIC)
 // ------------------------------------------------------------------
-const mapErrorToMessage = (error: any, provider: string): string => {
-    const status = error?.status;
-    const msg = String(error?.message || "").toLowerCase();
-    const type = error?.errorType || '';
-    const pName = provider.toUpperCase();
 
-    // 1. Diagnostics & Runtime Failures
-    if (status === 'RUNTIME_ERROR') {
-        return `(System: [${pName} Environment] Runtime Failure - Environment variables are inaccessible in this context.)`;
-    }
-    if (status === 'MISSING_KEY') {
-        return `(System: [${pName} Config] ${pName}_API_KEY not found in environment.)`;
-    }
-    if (status === 'RESOLUTION_CRASH') {
-        return `(System: [${pName} Fatal] Encountered a crash while resolving the provider identity.)`;
-    }
-
-    // 2. Authentication Failures
-    if (status === 401 || status === 403 || type === 'authentication_error') {
-        return `(System: [${pName} Auth] The API key in your environment is invalid or has been revoked.)`;
-    }
-
-    // 3. Quota & Rate Limits
-    if (status === 429 || type === 'rate_limit_reached' || msg.includes("quota") || msg.includes("rate limit")) {
-        return `(System: [${pName} Quota] Capacity reached. Deleting this message clears the provider state.)`;
-    }
-
-    // 4. Server & Model Failures
-    if (status >= 500) {
-        return `(System: [${pName} Server] The AI service is currently overloaded or experiencing downtime.)`;
-    }
-    if (msg.includes("not found") || msg.includes("invalid model")) {
-        return `(System: [${pName} Model] The selected model is not available for this key.)`;
-    }
-
-    // 5. Network & Unknown
-    if (msg.includes("fetch") || msg.includes("network")) {
-        return `(System: [${pName} Network] Connection failed. Check your internet or proxy settings.)`;
-    }
-
-    return `(System: [${pName} Error] ${error.message || "An unexpected error occurred. Continuity is preserved."})`;
-};
-
-// ------------------------------------------------------------------
-// 🤖 CORE AI ROUTER
-// ------------------------------------------------------------------
 export const generateBotResponse = async (
     history: ChatMessage[],
     bot: Pick<BotProfile, 'name' | 'personality' | 'isSpicy' | 'conversationMode' | 'gender'>,
@@ -234,52 +147,38 @@ export const generateBotResponse = async (
     onQuotaExceeded?: () => void
 ): Promise<string> => {
     
-    let providerId: 'gemini' | 'deepseek' | 'groq' | 'local' = 'gemini';
-    if (modelId === 'local-offline') providerId = 'local';
-    else if (modelId.startsWith('deepseek-')) providerId = 'deepseek';
-    else if (modelId.startsWith('llama-') || modelId.startsWith('mixtral-')) providerId = 'groq';
+    const isLocal = modelId === 'local-offline';
+    if (isLocal) return processLocalResponse(history, bot);
 
-    if (providerId === 'local') return processLocalResponse(history, bot);
-
-    const execute = async () => {
-        if (providerId === 'gemini') return await runGeminiRequest(modelId, history, bot);
-        if (providerId === 'deepseek') return await runDeepSeekRequest(modelId, history, bot);
-        return await runGroqRequest(modelId, history, bot);
-    };
+    const providerId: 'gemini' | 'deepseek' | 'groq' = 
+        modelId.startsWith('deepseek-') ? 'deepseek' : 
+        (modelId.startsWith('llama-') || modelId.startsWith('mixtral-') ? 'groq' : 'gemini');
 
     try {
-        const result = await execute();
+        const result = await serverSideGateway(providerId, modelId, history, bot);
         onSuccess?.();
         return result;
     } catch (error: any) {
-        // Transient failures logic (429, 5xx)
+        // Auto-retry transient server errors
         const isTransient = error.status === 429 || error.status >= 500;
-        let retryFlag = false;
-        if (providerId === 'gemini') retryFlag = geminiRetryActive;
-        else if (providerId === 'deepseek') retryFlag = deepseekRetryActive;
-        else if (providerId === 'groq') retryFlag = groqRetryActive;
+        let activeRetry = providerId === 'gemini' ? geminiRetryFlag : (providerId === 'groq' ? groqRetryFlag : deepseekRetryFlag);
 
-        if (isTransient && !retryFlag) {
-            if (providerId === 'gemini') geminiRetryActive = true;
-            else if (providerId === 'deepseek') deepseekRetryActive = true;
-            else groqRetryActive = true;
-
+        if (isTransient && !activeRetry) {
+            if (providerId === 'gemini') geminiRetryFlag = true; else if (providerId === 'groq') groqRetryFlag = true; else deepseekRetryFlag = true;
             try {
-                const retryResult = await execute();
+                const result = await serverSideGateway(providerId, modelId, history, bot);
                 onSuccess?.();
-                return retryResult;
-            } catch (retryError: any) {
-                if (String(retryError?.message).toLowerCase().includes("quota")) onQuotaExceeded?.();
-                return mapErrorToMessage(retryError, providerId);
+                return result;
+            } catch (retryError) {
+                if (mapGatewayError(retryError, providerId).includes("Quota")) onQuotaExceeded?.();
+                return mapGatewayError(retryError, providerId);
             } finally {
-                if (providerId === 'gemini') geminiRetryActive = false;
-                else if (providerId === 'deepseek') deepseekRetryActive = false;
-                else groqRetryActive = false;
+                resetApiState();
             }
         }
         
-        if (String(error?.message).toLowerCase().includes("quota")) onQuotaExceeded?.();
-        return mapErrorToMessage(error, providerId);
+        if (mapGatewayError(error, providerId).includes("Quota")) onQuotaExceeded?.();
+        return mapGatewayError(error, providerId);
     }
 };
 
@@ -289,20 +188,12 @@ export const generateUserSuggestion = async (
     modelId: AIModelOption = 'gemini-3-flash-preview'
 ): Promise<string> => {
     try {
-        const resolution = resolveKey('gemini');
-        if (!resolution.key) return "Tell me more.";
-        const ai = new GoogleGenAI({ apiKey: resolution.key });
-        const contextText = history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n');
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: [{ role: 'user', parts: [{ text: `Suggest one short message for the user based on history:\n${contextText}` }] }],
-            config: { 
-                systemInstruction: `You are ${bot.name}'s assistant. Suggest 1 natural msg for the user.`,
-                temperature: 0.8 
-            }
-        });
-        return response.text?.trim() || "What's next?";
-    } catch { return "Hey, tell me more."; }
+        const result = await serverSideGateway('gemini', 'gemini-3-flash-preview', 
+            [{ sender: 'user', id: 'sys', timestamp: Date.now(), text: `Suggest one short message for the user based on history:\n${history.slice(-5).map(m => `${m.sender}: ${m.text}`).join('\n')}` }],
+            { ...bot, personality: `You are ${bot.name}'s assistant. Suggest 1 natural msg for the user.` }
+        );
+        return result.trim();
+    } catch { return "Tell me more."; }
 };
 
 export const generateDynamicDescription = async (personality: string): Promise<string> => {
@@ -312,9 +203,10 @@ export const generateDynamicDescription = async (personality: string): Promise<s
 };
 
 export const generateImage = async (prompt: string, sourceImage?: string | null): Promise<string> => {
-    const resolution = resolveKey('gemini');
-    if (!resolution.key) throw new Error("GEMINI_API_KEY missing.");
-    const ai = new GoogleGenAI({ apiKey: resolution.key });
+    // Images are strictly routed via the Server Proxy using Gemini 2.5
+    const auth = serverOnlyResolveKey('gemini');
+    if (auth.error) throw new Error(auth.error);
+    const ai = new GoogleGenAI({ apiKey: auth.key! });
     const parts: any[] = [{ text: prompt }];
     if (sourceImage) {
         const [mimeInfo, base64Data] = sourceImage.split(',');
@@ -327,16 +219,12 @@ export const generateImage = async (prompt: string, sourceImage?: string | null)
     });
     const imgPart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
     if (imgPart) return imgPart.inlineData.data;
-    throw new Error("Generation failed.");
+    throw new Error("Proxy: Image generation failed.");
 };
 
 export const generateCodePrompt = async (task: string, language: string): Promise<string> => {
-    const resolution = resolveKey('gemini');
-    if (!resolution.key) throw new Error("GEMINI_API_KEY missing.");
-    const ai = new GoogleGenAI({ apiKey: resolution.key });
-    const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `Create prompt for ${task} in ${language}.`
-    });
-    return response.text || "Failed.";
+    return await serverSideGateway('gemini', 'gemini-3-pro-preview', 
+        [{ sender: 'user', id: 'sys', timestamp: Date.now(), text: `Create prompt for ${task} in ${language}.` }],
+        { personality: 'Technical Prompt Engineer' }
+    );
 };

@@ -90,7 +90,6 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'photo' | 'gif' | 'background' | 'gallery' | 'video') => {
     if (e.target.files) {
       if (fileType === 'gallery') {
-         // Added explicit type annotation (file: File) to avoid unknown type errors in readAsDataURL
          Array.from(e.target.files).forEach((file: File) => {
              const reader = new FileReader();
              reader.onload = (event) => {
@@ -101,7 +100,6 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
              reader.readAsDataURL(file);
          });
       } else if (fileType === 'video') {
-         // Added explicit type annotation (file: File) to avoid unknown type errors in readAsDataURL
          Array.from(e.target.files).forEach((file: File) => {
              const reader = new FileReader();
              reader.onload = (event) => {
@@ -267,7 +265,7 @@ const CreationPage: React.FC<CreationPageProps> = ({ onSaveBot, onNavigate, botT
             <input id="video-upload" type="file" accept="video/*" multiple onChange={(e) => handleFileUpload(e, 'video')} className="hidden" />
             <div className="flex flex-wrap gap-2">
                 <label htmlFor="video-upload" className="cursor-pointer w-24 h-24 bg-white/5 dark:bg-black/5 rounded-2xl border-2 border-dashed border-white/20 dark:border-black/20 flex items-center justify-center flex-shrink-0">
-                   <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                   <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                 </label>
                 {galleryVideos.map((vid, idx) => (
                     <div key={idx} className="w-24 h-24 relative group flex-shrink-0">

@@ -92,7 +92,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
     onNavigate('version');
   }
 
-  // Added explicit return type Record<string, typeof aiModelOptions> to ensure TypeScript correctly identifies 'options' as an array in the render phase
   const groupedOptions = useMemo<Record<string, typeof aiModelOptions>>(() => {
       const groups: Record<string, typeof aiModelOptions> = {};
       aiModelOptions.forEach(opt => {
@@ -187,7 +186,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, theme, t
                 <div className="bg-white/5 dark:bg-black/10 p-4 rounded-xl">
                     <p className="font-medium mb-2">AI Provider & Model</p>
                     <div className="space-y-4">
-                        {Object.entries(groupedOptions).map(([provider, options]) => (
+                        {/* FIX: Explicitly type Object.entries result to resolve 'unknown' error on options.map */}
+                        {(Object.entries(groupedOptions) as [string, typeof aiModelOptions][]).map(([provider, options]) => (
                             <div key={provider} className="space-y-1">
                                 <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">{provider}</p>
                                 {options.map(option => (

@@ -42,11 +42,9 @@ const BarChart: React.FC<{ data: { label: string, value: number }[], title: stri
 
 
 const StatsDashboard: React.FC<StatsDashboardProps> = ({ bots, personas, chatHistories, sessions, onBack }) => {
-    // --- Calculations ---
     const totalBots = bots.length;
     const totalPersonas = personas.length;
 
-    // FIX: Explicitly cast Object.values to ChatMessage[][] to resolve "unknown" inference in concat and prevent TS error 2769.
     const allMessages: ChatMessage[] = (Object.values(chatHistories) as ChatMessage[][]).reduce<ChatMessage[]>((acc, val) => acc.concat(val), [] as ChatMessage[]);
     const userMessages = allMessages.filter(m => m.sender === 'user');
     const botMessages = allMessages.filter(m => m.sender === 'bot');
@@ -77,7 +75,6 @@ const StatsDashboard: React.FC<StatsDashboardProps> = ({ bots, personas, chatHis
         
     const barChartData = messageCountByBot.map(b => ({ label: b.name, value: b.userMessages })).sort((a,b) => b.value - a.value);
     
-    // --- Daily Usage Graph Data ---
     const dailyUsageData = Array(7).fill(0).map((_, i) => {
         const d = new Date();
         d.setHours(0, 0, 0, 0);
@@ -99,7 +96,6 @@ const StatsDashboard: React.FC<StatsDashboardProps> = ({ bots, personas, chatHis
         value: Math.round(d.duration / 60000) // in minutes
     }));
 
-    // --- Render ---
     return (
         <div className="h-full w-full flex flex-col p-4 bg-light-bg text-light-text dark:bg-dark-bg dark:text-dark-text animate-fadeIn">
             <header className="flex items-center mb-6">
